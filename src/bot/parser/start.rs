@@ -36,7 +36,7 @@ where
 
     let txn = conn.begin().await?;
 
-    let player = crate::entities::player::insert(
+    crate::entities::player::insert(
         &txn,
         user.id,
         chat.id,
@@ -56,53 +56,21 @@ where
     .update(&txn)
     .await?;
 
-    let black_card = crate::entities::hand::draw(
-        &txn,
-        player.id,
-        chat.id,
-        chat.turn,
-        player.is_my_turn(&chat),
-    )
-    .await?;
-
-    if let Some(card) = black_card.as_ref() {
-        let pick = card.pick();
-
-        if chat.rando_carlissian {
-            for _ in 0..pick {
-                crate::entities::hand::draw(&txn, 0, chat.id, chat.turn, false).await?;
-            }
-        }
-
-        crate::entities::chat::ActiveModel {
-            id: ActiveValue::Set(chat.id),
-            pick: ActiveValue::Set(pick),
-            ..Default::default()
-        }
-        .update(&txn)
-        .await?;
-    }
-
-    txn.commit().await?;
-
     let msg = format!(
-        "Player created{}{}{}",
+        "Player created{}\n\n{}",
         match chat.players {
-            1 => ", you're the first one on this chat",
-            2 => ", you're the second one on this chat",
+            1 => ", you're the first one on this chat, you can start a game as soon as someone else joins",
+            2 => ", you're the second one on this chat, you can start a game enabling Rando Carlissian from /settings",
+            3 => ", you're the third one on this chat, you can now play freely without Rando Carlissian",
             _ => "",
         },
-        if chat.players < 2 + !chat.rando_carlissian as i32 {
-            ", a game will start as soon as someone else joins"
-        } else {
-            ""
-        },
-        if let Some(card) = black_card {
-            format!("\n\n{}", card.descr())
+        if chat.players + chat.rando_carlissian as i32 > 2 {
+            chat.reset(&txn).await?
         } else {
             String::new()
         }
     );
+    txn.commit().await?;
 
     client
         .execute(

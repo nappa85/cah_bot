@@ -81,22 +81,30 @@ where
 
     let stream = crate::entities::hand::Entity::find()
         .filter(
-            crate::entities::hand::Column::ChatId.eq(chat.id).and(
-                crate::entities::hand::Column::PlayerId
-                    .ne(player.id)
-                    .and(crate::entities::hand::Column::PlayedOnTurn.eq(chat.turn)),
-            ),
+            crate::entities::hand::Column::ChatId
+                .eq(chat.id)
+                .and(crate::entities::hand::Column::PlayedOnTurn.eq(chat.turn)),
         )
         .order_by_asc(crate::entities::hand::Column::Seq)
         .stream(conn)
         .await?;
-    let hands = stream
-        .try_fold(HashMap::with_capacity(players.len()), |mut hands, hand| {
-            let player: &mut Vec<_> = hands.entry(hand.player_id).or_default();
-            player.push(hand);
-            future::ready(Ok(hands))
-        })
+    let (judge_card, hands) = stream
+        .try_fold(
+            (None, HashMap::with_capacity(players.len())),
+            |(mut judge_card, mut hands), hand| {
+                if hand.player_id == player.id {
+                    judge_card = Some(hand.card_id);
+                } else {
+                    let player: &mut Vec<_> = hands.entry(hand.player_id).or_default();
+                    player.push(hand);
+                }
+                future::ready(Ok((judge_card, hands)))
+            },
+        )
         .await?;
+    let Some(judge_card) = judge_card else {
+        return Ok(true);
+    };
     if hands.len() < players.len() || hands.values().map(Vec::len).min() < Some(chat.pick as usize)
     {
         return Ok(true);
@@ -104,13 +112,12 @@ where
 
     let stream = crate::entities::card::Entity::find()
         .filter(
-            crate::entities::card::Column::Id
-                .is_in(
-                    hands
-                        .values()
-                        .flat_map(|hand| hand.iter().map(|h| h.card_id)),
-                )
-                .and(crate::entities::card::Column::Color.eq(crate::entities::card::Color::White)),
+            crate::entities::card::Column::Id.is_in(
+                hands
+                    .values()
+                    .flat_map(|hand| hand.iter().map(|h| h.card_id))
+                    .chain([judge_card]),
+            ),
         )
         .stream(conn)
         .await?;
@@ -138,7 +145,8 @@ where
             InlineQueryResult::Article(InlineQueryResultArticle::new(
                 hand_ids.join(" "),
                 InputMessageContentText::new(format!(
-                    "I've choosen {}'s card{}:\n\n*{}*",
+                    "*{}*\n\nI've choosen {}'s card{}:\n\n*{}*",
+                    cards[&judge_card],
                     player,
                     if len > 1 { "s" } else { "" },
                     hand_texts.join("\n")

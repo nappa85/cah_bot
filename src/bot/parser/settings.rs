@@ -2,11 +2,13 @@ use std::borrow::Cow;
 
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QuerySelect,
+    QuerySelect, TransactionTrait,
 };
 use tgbot::{
     api::Client,
-    types::{EditMessageReplyMarkup, InlineKeyboardButton, ReplyParameters, SendMessage},
+    types::{
+        EditMessageReplyMarkup, InlineKeyboardButton, ParseMode, ReplyParameters, SendMessage,
+    },
 };
 
 use crate::{entities::chat::Model as Chat, Error};
@@ -22,7 +24,7 @@ pub async fn execute<C>(
     query_data: Option<&str>,
 ) -> Result<Result<(), Cow<'static, str>>, Error>
 where
-    C: ConnectionTrait,
+    C: ConnectionTrait + TransactionTrait,
 {
     let packs = crate::entities::pack::Entity::find().all(conn).await?;
 
@@ -40,34 +42,34 @@ where
     if let Some(data) = query_data {
         match data {
             "rando" => {
-                crate::entities::chat::ActiveModel {
+                let txn = conn.begin().await?;
+
+                let chat = crate::entities::chat::ActiveModel {
                     id: ActiveValue::Set(chat.id),
                     rando_carlissian: ActiveValue::Set(!chat.rando_carlissian),
                     ..Default::default()
                 }
-                .update(conn)
+                .update(&txn)
                 .await?;
-                rando_carlissian = !chat.rando_carlissian;
+                rando_carlissian = chat.rando_carlissian;
 
-                if rando_carlissian {
-                    crate::entities::hand::draw(conn, 0, chat.id, chat.turn, false).await?;
-                } else {
-                    let hands = crate::entities::hand::Entity::find()
-                        .filter(
-                            crate::entities::hand::Column::ChatId
-                                .eq(chat.id)
-                                .and(crate::entities::hand::Column::PlayerId.eq(0)),
+                let msg = chat.reset(&txn).await?;
+                txn.commit().await?;
+
+                if chat.players + chat.rando_carlissian as i32 > 2 {
+                    client
+                        .execute(
+                            SendMessage::new(chat.telegram_id, msg)
+                                .with_reply_markup([[
+                                    InlineKeyboardButton::for_switch_inline_query_current_chat(
+                                        "Open cards hand",
+                                        chat.id.to_string(),
+                                    ),
+                                ]])
+                                .with_reply_parameters(ReplyParameters::new(message_id))
+                                .with_parse_mode(ParseMode::Markdown),
                         )
-                        .all(conn)
                         .await?;
-                    for hand in hands {
-                        crate::entities::hand::ActiveModel {
-                            id: ActiveValue::Set(hand.id),
-                            ..Default::default()
-                        }
-                        .delete(conn)
-                        .await?;
-                    }
                 }
             }
             "all" => {

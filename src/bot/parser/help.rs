@@ -18,8 +18,10 @@ pub async fn execute(
                 format!(
                     "[Cards Against Humanity Bot](https://github.com/nappa85/cah_bot/)
 
+/close - close the game and get a winner
 /help - this message
 /start - start or join the game in this chat
+/settings - change game setting for this chat
 /status - show game status
 /rank - show players ranking
 

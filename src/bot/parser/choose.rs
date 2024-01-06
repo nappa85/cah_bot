@@ -108,53 +108,8 @@ where
     .update(&txn)
     .await?;
 
-    let players = player::Entity::find()
-        .filter(player::Column::ChatId.eq(chat.id))
-        .all(&txn)
-        .await?;
-    let mut black_card = None;
-    for player in players {
-        if let Some(card) = hand::draw(
-            &txn,
-            player.id,
-            chat.id,
-            chat.turn,
-            player.is_my_turn(&chat),
-        )
-        .await?
-        {
-            black_card = Some((player, card));
-        }
-    }
-
-    let msg = if let Some((judge, card)) = black_card {
-        let pick = card.pick();
-        chat::ActiveModel {
-            id: ActiveValue::Set(chat.id),
-            pick: ActiveValue::Set(pick),
-            ..Default::default()
-        }
-        .update(&txn)
-        .await?;
-
-        if chat.rando_carlissian {
-            for _ in 0..pick {
-                hand::draw(&txn, 0, chat.id, chat.turn, false).await?;
-            }
-        }
-
-        txn.commit().await?;
-
-        format!(
-            "Turn {}\n\n{}\n\nJudge is {}",
-            chat.turn,
-            card.descr(),
-            judge.tg_link(),
-        )
-    } else {
-        txn.rollback().await?;
-        String::from("Error: no black card picked")
-    };
+    let msg = chat.reset(&txn).await?;
+    txn.commit().await?;
 
     client
         .execute(
