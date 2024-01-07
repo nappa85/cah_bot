@@ -1,5 +1,7 @@
 use sea_orm::{entity::prelude::*, ActiveValue, QuerySelect};
 
+use super::{chat, hand};
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "players")]
 pub struct Model {
@@ -14,19 +16,19 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::chat::Entity")]
+    #[sea_orm(has_one = "chat::Entity")]
     Chat,
-    #[sea_orm(has_many = "super::hand::Entity")]
+    #[sea_orm(has_many = "hand::Entity")]
     Hand,
 }
 
-impl Related<super::chat::Entity> for Entity {
+impl Related<chat::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Chat.def()
     }
 }
 
-impl Related<super::hand::Entity> for Entity {
+impl Related<hand::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Hand.def()
     }
@@ -35,7 +37,7 @@ impl Related<super::hand::Entity> for Entity {
 impl ActiveModelBehavior for ActiveModel {}
 
 impl Model {
-    pub fn is_my_turn(&self, chat: &super::chat::Model) -> bool {
+    pub fn is_my_turn(&self, chat: &chat::Model) -> bool {
         let mut turn = chat.turn % chat.players;
         if turn == 0 {
             turn = chat.players;
@@ -74,53 +76,3 @@ pub async fn insert<C: ConnectionTrait>(
     .insert(conn)
     .await
 }
-
-// #[cfg(test)]
-// pub mod tests {
-//     use chrono::Utc;
-//     use sea_orm::{DbBackend, EntityTrait, MockDatabase};
-
-//     pub fn mock_player() -> [super::Model; 1] {
-//         [super::Model {
-//             id: 1,
-//             telegram_id: 1,
-//             chat_id: 1,
-//             name: String::from("pippo"),
-//         }]
-//     }
-
-//     #[tokio::test]
-//     async fn score() {
-//         // queries must be in the order they are executed
-//         let conn: sea_orm::DatabaseConnection = MockDatabase::new(DbBackend::Sqlite)
-//             .append_query_results([mock_player()])
-//             .append_query_results([crate::entities::team::tests::mock_team()])
-//             .append_query_results([crate::entities::position::tests::mock_positions()])
-//             .into_connection();
-
-//         let player = super::Entity::find_by_id(1)
-//             .one(&conn)
-//             .await
-//             .unwrap()
-//             .unwrap();
-//         let score = player.score(&conn, Utc::now().naive_utc()).await.unwrap();
-//         assert_eq!(score, 9);
-//     }
-
-//     #[tokio::test]
-//     async fn empty_score() {
-//         // queries must be in the order they are executed
-//         let conn: sea_orm::DatabaseConnection = MockDatabase::new(DbBackend::Sqlite)
-//             .append_query_results([mock_player()])
-//             .append_query_results::<crate::entities::team::Model, _, _>([[]])
-//             .into_connection();
-
-//         let player = super::Entity::find_by_id(1)
-//             .one(&conn)
-//             .await
-//             .unwrap()
-//             .unwrap();
-//         let score = player.score(&conn, Utc::now().naive_utc()).await.unwrap();
-//         assert_eq!(score, 0);
-//     }
-// }

@@ -9,7 +9,10 @@ use tgbot::{
     types::{InlineKeyboardButton, ParseMode, ReplyParameters, SendMessage},
 };
 
-use crate::{entities::chat::Model as Chat, Error};
+use crate::{
+    entities::{chat::Model as Chat, hand, player},
+    Error,
+};
 
 pub async fn execute<C>(
     client: &Client,
@@ -20,16 +23,16 @@ pub async fn execute<C>(
 where
     C: ConnectionTrait + StreamTrait,
 {
-    let stream = crate::entities::player::Entity::find()
-        .filter(crate::entities::player::Column::ChatId.eq(chat.id))
-        .order_by_desc(crate::entities::player::Column::Points)
+    let stream = player::Entity::find()
+        .filter(player::Column::ChatId.eq(chat.id))
+        .order_by_desc(player::Column::Points)
         .stream(conn)
         .await?;
 
     let mut players = stream
         .map_ok(|player| {
             (
-                player.points,
+                player.points as i64,
                 format!("\n{} {} points", player.tg_link(), player.points),
             )
         })
@@ -37,21 +40,21 @@ where
         .await?;
 
     if chat.rando_carlissian {
-        let won = crate::entities::hand::Entity::find()
+        let won = hand::Entity::find()
             .filter(
-                crate::entities::hand::Column::ChatId
+                hand::Column::ChatId
                     .eq(chat.id)
-                    .and(crate::entities::hand::Column::PlayerId.eq(0))
-                    .and(crate::entities::hand::Column::Won.eq(true)),
+                    .and(hand::Column::PlayerId.eq(0))
+                    .and(hand::Column::Won.eq(true)),
             )
             .select_only()
-            .column_as(crate::entities::hand::Column::Id.count(), "ids")
+            .column_as(hand::Column::Id.count(), "ids")
             .into_tuple::<Option<i64>>()
             .one(conn)
             .await?
             .flatten()
             .unwrap_or_default();
-        players.push((won as i32, format!("\nRando Carlissian {won} points")));
+        players.push((won, format!("\n{} {won} points", crate::RANDO_CARLISSIAN)));
         players.sort_by(|(points_a, _), (points_b, _)| points_b.cmp(points_a));
     }
 

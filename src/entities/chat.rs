@@ -1,7 +1,9 @@
 use chrono::{NaiveDateTime, Utc};
 use sea_orm::{entity::prelude::*, ActiveValue, DatabaseTransaction, TransactionTrait};
 
-use crate::entities::{hand, player};
+use crate::Error;
+
+use super::{chat_pack, hand, player};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "chats")]
@@ -9,6 +11,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
     pub telegram_id: i64,
+    pub owner: Option<i32>,
     pub start_date: NaiveDateTime,
     pub end_date: Option<NaiveDateTime>,
     pub players: i32,
@@ -19,27 +22,27 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::player::Entity")]
+    #[sea_orm(has_many = "player::Entity")]
     Player,
-    #[sea_orm(has_many = "super::chat_pack::Entity")]
+    #[sea_orm(has_many = "chat_pack::Entity")]
     Pack,
-    #[sea_orm(has_many = "super::hand::Entity")]
+    #[sea_orm(has_many = "hand::Entity")]
     Hand,
 }
 
-impl Related<super::player::Entity> for Entity {
+impl Related<player::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Player.def()
     }
 }
 
-impl Related<super::chat_pack::Entity> for Entity {
+impl Related<chat_pack::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Pack.def()
     }
 }
 
-impl Related<super::hand::Entity> for Entity {
+impl Related<hand::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Hand.def()
     }
@@ -57,7 +60,7 @@ impl Model {
         }
     }
 
-    pub async fn reset(&self, txn: &DatabaseTransaction) -> Result<String, crate::Error> {
+    pub async fn reset(&self, txn: &DatabaseTransaction) -> Result<String, Error> {
         let hands = hand::Entity::find()
             .filter(
                 hand::Column::ChatId.eq(self.id).and(

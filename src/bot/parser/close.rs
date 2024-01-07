@@ -8,60 +8,94 @@ use sea_orm::{
 };
 use tgbot::{
     api::Client,
-    types::{ParseMode, ReplyParameters, SendMessage},
+    types::{ParseMode, ReplyParameters, SendMessage, User},
 };
 
-use crate::{entities::chat::Model as Chat, Error};
+use crate::{
+    entities::{
+        chat::{self, Model as Chat},
+        hand, player,
+    },
+    Error,
+};
 
 pub async fn execute<C>(
     client: &Client,
     conn: &C,
+    user: &User,
     message_id: i64,
     chat: &Chat,
 ) -> Result<Result<(), Cow<'static, str>>, Error>
 where
     C: ConnectionTrait + StreamTrait,
 {
-    let stream = crate::entities::player::Entity::find()
+    let Some(player) = player::Entity::find()
         .filter(
-            crate::entities::player::Column::ChatId
-                .eq(chat.id)
-                .and(crate::entities::player::Column::Points.gt(0)),
+            player::Column::TelegramId
+                .eq(i64::from(user.id))
+                .and(player::Column::ChatId.eq(chat.id)),
         )
-        .order_by_desc(crate::entities::player::Column::Points)
+        .one(conn)
+        .await?
+    else {
+        return Ok(Ok(()));
+    };
+
+    if chat.owner != Some(player.id) {
+        let Some(owner) = player::Entity::find_by_id(chat.owner.unwrap_or_default())
+            .one(conn)
+            .await?
+        else {
+            return Ok(Ok(()));
+        };
+
+        return Ok(Err(format!(
+            "You're not the game owner, only {} can use this command",
+            owner.tg_link()
+        )
+        .into()));
+    }
+
+    let stream = player::Entity::find()
+        .filter(
+            player::Column::ChatId
+                .eq(chat.id)
+                .and(player::Column::Points.gt(0)),
+        )
+        .order_by_desc(player::Column::Points)
         .stream(conn)
         .await?;
 
     let mut players = stream
-        .map_ok(|player| (player.points, player.tg_link()))
+        .map_ok(|player| (player.points as i64, Cow::Owned(player.tg_link())))
         .try_collect::<Vec<_>>()
         .await?;
 
     if chat.rando_carlissian {
-        let won = crate::entities::hand::Entity::find()
+        let won = hand::Entity::find()
             .filter(
-                crate::entities::hand::Column::ChatId
+                hand::Column::ChatId
                     .eq(chat.id)
-                    .and(crate::entities::hand::Column::PlayerId.eq(0))
-                    .and(crate::entities::hand::Column::Won.eq(true)),
+                    .and(hand::Column::PlayerId.eq(0))
+                    .and(hand::Column::Won.eq(true)),
             )
             .select_only()
-            .column_as(crate::entities::hand::Column::Id.count(), "ids")
+            .column_as(hand::Column::Id.count(), "ids")
             .into_tuple::<Option<i64>>()
             .one(conn)
             .await?
             .flatten()
             .unwrap_or_default();
         if won > 0 {
-            players.push((won as i32, String::from("Rando Carlissian")));
+            players.push((won, Cow::Borrowed(crate::RANDO_CARLISSIAN)));
             players.sort_by(|(points_a, _), (points_b, _)| points_b.cmp(points_a));
         }
     }
 
     let msg = if players.is_empty() {
-        String::from("No points assigned in this game")
+        String::from("Error: you can't close an unstarted game")
     } else {
-        crate::entities::chat::ActiveModel {
+        chat::ActiveModel {
             id: ActiveValue::Set(chat.id),
             end_date: ActiveValue::Set(Some(Utc::now().naive_utc())),
             ..Default::default()
@@ -75,19 +109,18 @@ where
             .map_while(|(points, player)| (points == winner_points).then_some(player))
             .collect::<Vec<_>>();
 
-        if winners.len() == 1 {
-            format!(
-                "After {} turns the winner is {} with {} points",
-                chat.turn, winners[0], winner_points
-            )
-        } else {
-            format!(
-                "After {} turns the winners are {} with {} points",
-                chat.turn,
-                winners.join(" and "),
-                winner_points
-            )
-        }
+        format!(
+            "After {} turns the winner{} {} with {} points{}",
+            chat.turn - 1,
+            if winners.len() > 1 { "s are" } else { " is" },
+            winners.join(" and "),
+            winner_points,
+            if winners.len() == 1 && winners[0] == crate::RANDO_CARLISSIAN {
+                "\n\n*SHAME ON YOU!!!*"
+            } else {
+                ""
+            }
+        )
     };
 
     client

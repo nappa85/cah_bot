@@ -9,7 +9,13 @@ use tgbot::{
     types::{InlineKeyboardButton, ParseMode, ReplyParameters, SendMessage, User},
 };
 
-use crate::{entities::chat::Model as Chat, Error};
+use crate::{
+    entities::{
+        chat::{self, Model as Chat},
+        player,
+    },
+    Error,
+};
 
 pub async fn execute<C>(
     client: &Client,
@@ -21,11 +27,11 @@ pub async fn execute<C>(
 where
     C: ConnectionTrait + TransactionTrait,
 {
-    if crate::entities::player::Entity::find()
+    if player::Entity::find()
         .filter(
-            crate::entities::player::Column::TelegramId
+            player::Column::TelegramId
                 .eq(i64::from(user.id))
-                .and(crate::entities::player::Column::ChatId.eq(chat.id)),
+                .and(player::Column::ChatId.eq(chat.id)),
         )
         .one(conn)
         .await?
@@ -36,7 +42,7 @@ where
 
     let txn = conn.begin().await?;
 
-    crate::entities::player::insert(
+    let player = player::insert(
         &txn,
         user.id,
         chat.id,
@@ -48,8 +54,13 @@ where
     )
     .await?;
 
-    let chat = crate::entities::chat::ActiveModel {
+    let chat = chat::ActiveModel {
         id: ActiveValue::Set(chat.id),
+        owner: if chat.players == 0 {
+            ActiveValue::Set(Some(player.id))
+        } else {
+            ActiveValue::NotSet
+        },
         players: ActiveValue::Set(chat.players + 1),
         ..Default::default()
     }
@@ -59,10 +70,10 @@ where
     let msg = format!(
         "Player created{}\n\n{}",
         match chat.players {
-            1 => ", you're the first one on this chat, you can start a game as soon as someone else joins",
-            2 => ", you're the second one on this chat, you can start a game enabling Rando Carlissian from /settings",
-            3 => ", you're the third one on this chat, you can now play freely without Rando Carlissian",
-            _ => "",
+            1 => Cow::Borrowed(", you're the owner of this game, that means you're the only one who can use /settings and /close the game, you can start to play as soon as someone else joins"),
+            2 => Cow::Owned(format!(", you're the second one on this game, you can start playing by enabling {} from /settings", crate::RANDO_CARLISSIAN)),
+            3 => Cow::Owned(format!(", you're the third one on this game, you can now play freely without {}", crate::RANDO_CARLISSIAN)),
+            _ => Cow::Borrowed(""),
         },
         if chat.players + chat.rando_carlissian as i32 > 2 {
             chat.reset(&txn).await?

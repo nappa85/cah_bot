@@ -1,5 +1,7 @@
 use sea_orm::entity::prelude::*;
 
+use super::{hand, pack};
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "cards")]
 pub struct Model {
@@ -13,19 +15,19 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::pack::Entity")]
+    #[sea_orm(has_one = "pack::Entity")]
     Pack,
-    #[sea_orm(has_many = "super::hand::Entity")]
+    #[sea_orm(has_many = "hand::Entity")]
     Hand,
 }
 
-impl Related<super::pack::Entity> for Entity {
+impl Related<pack::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Pack.def()
     }
 }
 
-impl Related<super::hand::Entity> for Entity {
+impl Related<hand::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Hand.def()
     }

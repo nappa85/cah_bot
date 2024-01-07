@@ -3,6 +3,10 @@ use std::borrow::Cow;
 use sea_orm::{entity::prelude::*, ActiveValue, QuerySelect, TransactionTrait};
 use serde::Deserialize;
 
+use crate::Error;
+
+use super::{card, chat_pack};
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "packs")]
 pub struct Model {
@@ -14,19 +18,19 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::card::Entity")]
+    #[sea_orm(has_many = "card::Entity")]
     Card,
-    #[sea_orm(has_many = "super::chat_pack::Entity")]
+    #[sea_orm(has_many = "chat_pack::Entity")]
     Chat,
 }
 
-impl Related<super::card::Entity> for Entity {
+impl Related<card::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Card.def()
     }
 }
 
-impl Related<super::chat_pack::Entity> for Entity {
+impl Related<chat_pack::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Chat.def()
     }
@@ -34,7 +38,7 @@ impl Related<super::chat_pack::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
-pub async fn init<C>(conn: &C) -> Result<(), crate::Error>
+pub async fn init<C>(conn: &C) -> Result<(), Error>
 where
     C: ConnectionTrait + TransactionTrait,
 {
@@ -61,8 +65,8 @@ where
         .await?;
 
         for card in pack.black {
-            super::card::ActiveModel {
-                color: ActiveValue::Set(super::card::Color::Black),
+            card::ActiveModel {
+                color: ActiveValue::Set(card::Color::Black),
                 pack_id: ActiveValue::Set(model.id),
                 pick: ActiveValue::Set(card.pick),
                 text: ActiveValue::Set(card.text.into_owned()),
@@ -72,8 +76,8 @@ where
             .await?;
         }
         for card in pack.white {
-            super::card::ActiveModel {
-                color: ActiveValue::Set(super::card::Color::White),
+            card::ActiveModel {
+                color: ActiveValue::Set(card::Color::White),
                 pack_id: ActiveValue::Set(model.id),
                 pick: ActiveValue::Set(card.pick),
                 text: ActiveValue::Set(card.text.into_owned()),

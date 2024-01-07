@@ -55,7 +55,7 @@ where
                     message: Some(ref msg),
                     data: Some(ref data),
                     ..
-                }) => parser::parse_callback_query(&client, conn, msg, data).await?,
+                }) => parser::parse_callback_query(&client, conn, user, msg, data).await?,
                 _ => println!("Update {update:?}"),
             }
             offset = update.id;

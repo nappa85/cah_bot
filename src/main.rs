@@ -7,6 +7,7 @@ mod bot;
 mod entities;
 
 const PACKS: &str = include_str!("../cah-cards-full.json");
+static RANDO_CARLISSIAN: &str = "Rando Carlissian";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

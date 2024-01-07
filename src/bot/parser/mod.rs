@@ -9,7 +9,10 @@ use tgbot::{
     },
 };
 
-use crate::Error;
+use crate::{
+    entities::{chat, hand},
+    Error,
+};
 
 mod choose;
 mod close;
@@ -32,7 +35,7 @@ pub async fn parse_message<C>(
 where
     C: ConnectionTrait + StreamTrait + TransactionTrait,
 {
-    let chat = crate::entities::chat::find_or_insert(conn, chat_id).await?;
+    let chat = chat::find_or_insert(conn, chat_id).await?;
 
     let mut iter = msg.split_whitespace();
     let res = match iter.next().map(|msg| msg.strip_suffix(name).unwrap_or(msg)) {
@@ -40,10 +43,10 @@ where
             .await
             .map(Ok)?,
         Some("/start") => start::execute(client, conn, user, message_id, &chat).await?,
-        Some("/settings") => settings::execute(client, conn, message_id, &chat, None).await?,
+        Some("/settings") => settings::execute(client, conn, user, message_id, &chat, None).await?,
         Some("/status") => status::execute(client, conn, message_id, &chat).await?,
         Some("/rank") => rank::execute(client, conn, message_id, &chat).await?,
-        Some("/close") => close::execute(client, conn, message_id, &chat).await?,
+        Some("/close") => close::execute(client, conn, user, message_id, &chat).await?,
         _ => return Ok(()),
     };
 
@@ -63,6 +66,7 @@ where
 pub async fn parse_callback_query<C>(
     client: &Client,
     conn: &C,
+    user: &User,
     message: &MaybeInaccessibleMessage,
     data: &str,
 ) -> Result<(), Error>
@@ -73,9 +77,9 @@ where
         MaybeInaccessibleMessage::InaccessibleMessage(im) => (im.chat.get_id(), im.message_id),
         MaybeInaccessibleMessage::Message(m) => (m.chat.get_id(), m.id),
     };
-    let chat = crate::entities::chat::find_or_insert(conn, chat_id).await?;
+    let chat = chat::find_or_insert(conn, chat_id).await?;
 
-    let res = settings::execute(client, conn, message_id, &chat, Some(data)).await?;
+    let res = settings::execute(client, conn, user, message_id, &chat, Some(data)).await?;
 
     if let Err(err) = res {
         client
@@ -122,10 +126,7 @@ where
     let Ok(chat_id) = msg.parse::<i32>() else {
         return Ok(true);
     };
-    let Some(chat) = crate::entities::chat::Entity::find_by_id(chat_id)
-        .one(conn)
-        .await?
-    else {
+    let Some(chat) = chat::Entity::find_by_id(chat_id).one(conn).await? else {
         return Ok(true);
     };
 
@@ -150,8 +151,8 @@ where
     };
 
     let len = hand_ids.len();
-    let hands = crate::entities::hand::Entity::find()
-        .filter(crate::entities::hand::Column::Id.is_in(hand_ids))
+    let hands = hand::Entity::find()
+        .filter(hand::Column::Id.is_in(hand_ids))
         .all(conn)
         .await?;
     if hands.len() != len {

@@ -1,6 +1,10 @@
 use rand::{distributions::Uniform, seq::index::sample, Rng};
 use sea_orm::{entity::prelude::*, ActiveValue, QuerySelect};
 
+use crate::Error;
+
+use super::{card, chat, chat_pack, player};
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "hands")]
 pub struct Model {
@@ -17,27 +21,27 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::card::Entity")]
+    #[sea_orm(has_one = "card::Entity")]
     Card,
-    #[sea_orm(has_many = "super::player::Entity")]
+    #[sea_orm(has_one = "player::Entity")]
     Player,
-    #[sea_orm(has_many = "super::chat::Entity")]
+    #[sea_orm(has_one = "chat::Entity")]
     Chat,
 }
 
-impl Related<super::card::Entity> for Entity {
+impl Related<card::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Card.def()
     }
 }
 
-impl Related<super::player::Entity> for Entity {
+impl Related<player::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Player.def()
     }
 }
 
-impl Related<super::chat::Entity> for Entity {
+impl Related<chat::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Chat.def()
     }
@@ -60,10 +64,18 @@ pub async fn draw<C>(
     chat_id: i32,
     turn: i32,
     draw_black: bool,
-) -> Result<Option<super::card::Model>, crate::Error>
+) -> Result<Option<card::Model>, Error>
 where
     C: ConnectionTrait,
 {
+    let enabled_packs = chat_pack::Entity::find()
+        .filter(chat_pack::Column::ChatId.eq(chat_id))
+        .select_only()
+        .column(chat_pack::Column::PackId)
+        .into_tuple::<i32>()
+        .all(conn)
+        .await?;
+
     let already_picked = Entity::find()
         .filter(Column::ChatId.eq(chat_id))
         .select_only()
@@ -71,13 +83,15 @@ where
         .into_tuple::<i32>()
         .all(conn)
         .await?;
+
     let black_cards = if draw_black {
         Some(
-            super::card::Entity::find()
+            card::Entity::find()
                 .filter(
-                    super::card::Column::Color
-                        .eq(super::card::Color::Black)
-                        .and(super::card::Column::Id.is_not_in(already_picked.clone())),
+                    card::Column::Color
+                        .eq(card::Color::Black)
+                        .and(card::Column::Id.is_not_in(already_picked.clone()))
+                        .and(card::Column::PackId.is_in(enabled_packs.clone())),
                 )
                 .all(conn)
                 .await?,
@@ -85,14 +99,16 @@ where
     } else {
         None
     };
-    let white_cards = super::card::Entity::find()
+
+    let white_cards = card::Entity::find()
         .filter(
-            super::card::Column::Color
-                .eq(super::card::Color::White)
-                .and(super::card::Column::Id.is_not_in(already_picked)),
+            card::Column::Color
+                .eq(card::Color::White)
+                .and(card::Column::Id.is_not_in(already_picked))
+                .and(card::Column::PackId.is_in(enabled_packs.clone())),
         )
         .select_only()
-        .column(super::card::Column::Id)
+        .column(card::Column::Id)
         .into_tuple::<i32>()
         .all(conn)
         .await?;

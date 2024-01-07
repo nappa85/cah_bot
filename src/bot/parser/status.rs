@@ -7,7 +7,10 @@ use tgbot::{
     types::{InlineKeyboardButton, ParseMode, ReplyParameters, SendMessage},
 };
 
-use crate::{entities::chat::Model as Chat, Error};
+use crate::{
+    entities::{card, chat::Model as Chat, hand, player},
+    Error,
+};
 
 pub async fn execute<C>(
     client: &Client,
@@ -22,8 +25,8 @@ where
         return Ok(Err("Not enough players in the game".into()));
     }
 
-    let stream = crate::entities::player::Entity::find()
-        .filter(crate::entities::player::Column::ChatId.eq(chat.id))
+    let stream = player::Entity::find()
+        .filter(player::Column::ChatId.eq(chat.id))
         .stream(conn)
         .await?;
     let (judge, mut players) = stream
@@ -31,7 +34,7 @@ where
             if player.is_my_turn(chat) {
                 judge = Some(player);
             } else {
-                players.push((player.id, player.tg_link()));
+                players.push((player.id, Cow::Owned(player.tg_link())));
             }
             future::ready(Ok((judge, players)))
         })
@@ -42,14 +45,14 @@ where
     };
 
     if chat.rando_carlissian {
-        players.push((0, String::from("Rando Carlissian")));
+        players.push((0, Cow::Borrowed(crate::RANDO_CARLISSIAN)));
     }
 
-    let stream = crate::entities::hand::Entity::find()
+    let stream = hand::Entity::find()
         .filter(
-            crate::entities::hand::Column::ChatId
+            hand::Column::ChatId
                 .eq(chat.id)
-                .and(crate::entities::hand::Column::PlayedOnTurn.eq(chat.turn)),
+                .and(hand::Column::PlayedOnTurn.eq(chat.turn)),
         )
         .stream(conn)
         .await?;
@@ -71,8 +74,8 @@ where
     if judge_cards.len() != 1 {
         return Ok(Err("Multiple black card in game".into()));
     }
-    let Some(black_card) = crate::entities::card::Entity::find_by_id(judge_cards[0])
-        .filter(crate::entities::card::Column::Color.eq(crate::entities::card::Color::Black))
+    let Some(black_card) = card::Entity::find_by_id(judge_cards[0])
+        .filter(card::Column::Color.eq(card::Color::Black))
         .one(conn)
         .await?
     else {

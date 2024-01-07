@@ -5,13 +5,19 @@ use sea_orm::{
     QuerySelect, TransactionTrait,
 };
 use tgbot::{
-    api::Client,
+    api::{Client, ExecuteError},
     types::{
-        EditMessageReplyMarkup, InlineKeyboardButton, ParseMode, ReplyParameters, SendMessage,
+        EditMessageReplyMarkup, InlineKeyboardButton, ParseMode, ReplyParameters, SendMessage, User,
     },
 };
 
-use crate::{entities::chat::Model as Chat, Error};
+use crate::{
+    entities::{
+        chat::{self, Model as Chat},
+        chat_pack, pack, player,
+    },
+    Error,
+};
 
 const ENABLED: &str = "☑";
 const DISABLED: &str = "◻";
@@ -19,6 +25,7 @@ const DISABLED: &str = "◻";
 pub async fn execute<C>(
     client: &Client,
     conn: &C,
+    user: &User,
     message_id: i64,
     chat: &Chat,
     query_data: Option<&str>,
@@ -26,12 +33,44 @@ pub async fn execute<C>(
 where
     C: ConnectionTrait + TransactionTrait,
 {
-    let packs = crate::entities::pack::Entity::find().all(conn).await?;
+    let Some(player) = player::Entity::find()
+        .filter(
+            player::Column::TelegramId
+                .eq(i64::from(user.id))
+                .and(player::Column::ChatId.eq(chat.id)),
+        )
+        .one(conn)
+        .await?
+    else {
+        return Ok(Ok(()));
+    };
 
-    let mut enabled = crate::entities::chat_pack::Entity::find()
-        .filter(crate::entities::chat_pack::Column::ChatId.eq(chat.id))
+    if chat.owner != Some(player.id) {
+        // avoid spamming errors at every button clicked
+        if query_data.is_none() {
+            let Some(owner) = player::Entity::find_by_id(chat.owner.unwrap_or_default())
+                .one(conn)
+                .await?
+            else {
+                return Ok(Ok(()));
+            };
+
+            return Ok(Err(format!(
+                "You're not the game owner, only {} can use this command",
+                owner.tg_link()
+            )
+            .into()));
+        } else {
+            return Ok(Ok(()));
+        }
+    }
+
+    let packs = pack::Entity::find().all(conn).await?;
+
+    let mut enabled = chat_pack::Entity::find()
+        .filter(chat_pack::Column::ChatId.eq(chat.id))
         .select_only()
-        .column(crate::entities::chat_pack::Column::PackId)
+        .column(chat_pack::Column::PackId)
         .into_tuple::<i32>()
         .all(conn)
         .await?;
@@ -44,7 +83,7 @@ where
             "rando" => {
                 let txn = conn.begin().await?;
 
-                let chat = crate::entities::chat::ActiveModel {
+                let chat = chat::ActiveModel {
                     id: ActiveValue::Set(chat.id),
                     rando_carlissian: ActiveValue::Set(!chat.rando_carlissian),
                     ..Default::default()
@@ -75,7 +114,7 @@ where
             "all" => {
                 for pack in &packs {
                     if !enabled.contains(&pack.id) {
-                        crate::entities::chat_pack::ActiveModel {
+                        chat_pack::ActiveModel {
                             chat_id: ActiveValue::Set(chat.id),
                             pack_id: ActiveValue::Set(pack.id),
                         }
@@ -92,7 +131,7 @@ where
                         enabled.iter().position(|enabled_id| *enabled_id == pack.id),
                     ) {
                         (true, None) => {
-                            crate::entities::chat_pack::ActiveModel {
+                            chat_pack::ActiveModel {
                                 chat_id: ActiveValue::Set(chat.id),
                                 pack_id: ActiveValue::Set(pack.id),
                             }
@@ -101,7 +140,7 @@ where
                             enabled.push(pack.id);
                         }
                         (false, Some(index)) => {
-                            crate::entities::chat_pack::ActiveModel {
+                            chat_pack::ActiveModel {
                                 chat_id: ActiveValue::Set(chat.id),
                                 pack_id: ActiveValue::Set(pack.id),
                             }
@@ -122,7 +161,7 @@ where
             id => {
                 if let Ok(id) = id.parse::<i32>() {
                     if let Some(index) = enabled.iter().position(|enabled_id| *enabled_id == id) {
-                        crate::entities::chat_pack::ActiveModel {
+                        chat_pack::ActiveModel {
                             chat_id: ActiveValue::Set(chat.id),
                             pack_id: ActiveValue::Set(id),
                         }
@@ -130,7 +169,7 @@ where
                         .await?;
                         enabled.remove(index);
                     } else {
-                        crate::entities::chat_pack::ActiveModel {
+                        chat_pack::ActiveModel {
                             chat_id: ActiveValue::Set(chat.id),
                             pack_id: ActiveValue::Set(id),
                         }
@@ -149,7 +188,8 @@ where
         let mut keyboard = Vec::with_capacity(20);
         keyboard.push(vec![InlineKeyboardButton::for_callback_data(
             format!(
-                "Rando Carlissian {}",
+                "{} {}",
+                crate::RANDO_CARLISSIAN,
                 if rando_carlissian { ENABLED } else { DISABLED }
             ),
             "rando",
@@ -206,12 +246,19 @@ where
             )
             .await?;
     } else {
-        client
+        let res = client
             .execute(
                 EditMessageReplyMarkup::for_chat_message(chat.telegram_id, message_id)
                     .with_reply_markup(keyboard),
             )
-            .await?;
+            .await;
+        // if the page displayed doesn't change, we get a futile error
+        if let Err(ExecuteError::Response(ref err)) = res {
+            if err.description().contains("message is not modified") {
+                return Ok(Ok(()));
+            }
+        }
+        res?;
     }
 
     Ok(Ok(()))

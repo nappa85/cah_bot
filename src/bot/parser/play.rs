@@ -1,4 +1,4 @@
-use std::{collections::HashMap, future};
+use std::{borrow::Cow, collections::HashMap, future};
 
 use futures_util::TryStreamExt;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, StreamTrait};
@@ -11,7 +11,7 @@ use tgbot::{
 };
 
 use crate::{
-    entities::{chat::Model as Chat, player},
+    entities::{card, chat::Model as Chat, hand, player},
     Error,
 };
 
@@ -69,23 +69,23 @@ where
         .stream(conn)
         .await?;
     let mut players = stream
-        .map_ok(|player| (player.id, player.tg_link()))
+        .map_ok(|player| (player.id, Cow::Owned(player.tg_link())))
         .try_collect::<HashMap<_, _>>()
         .await?;
     if players.is_empty() {
         return Ok(true);
     }
     if chat.rando_carlissian {
-        players.insert(0, String::from("Rando Carlissian"));
+        players.insert(0, Cow::Borrowed(crate::RANDO_CARLISSIAN));
     }
 
-    let stream = crate::entities::hand::Entity::find()
+    let stream = hand::Entity::find()
         .filter(
-            crate::entities::hand::Column::ChatId
+            hand::Column::ChatId
                 .eq(chat.id)
-                .and(crate::entities::hand::Column::PlayedOnTurn.eq(chat.turn)),
+                .and(hand::Column::PlayedOnTurn.eq(chat.turn)),
         )
-        .order_by_asc(crate::entities::hand::Column::Seq)
+        .order_by_asc(hand::Column::Seq)
         .stream(conn)
         .await?;
     let (judge_card, hands) = stream
@@ -110,9 +110,9 @@ where
         return Ok(true);
     }
 
-    let stream = crate::entities::card::Entity::find()
+    let stream = card::Entity::find()
         .filter(
-            crate::entities::card::Column::Id.is_in(
+            card::Column::Id.is_in(
                 hands
                     .values()
                     .flat_map(|hand| hand.iter().map(|h| h.card_id))
@@ -174,12 +174,12 @@ async fn as_player<C>(
 where
     C: ConnectionTrait + StreamTrait,
 {
-    let stream = crate::entities::hand::Entity::find()
+    let stream = hand::Entity::find()
         .filter(
-            crate::entities::hand::Column::PlayerId.eq(player.id).and(
-                crate::entities::hand::Column::PlayedOnTurn
+            hand::Column::PlayerId.eq(player.id).and(
+                hand::Column::PlayedOnTurn
                     .eq(chat.turn)
-                    .or(crate::entities::hand::Column::PlayedOnTurn.is_null()),
+                    .or(hand::Column::PlayedOnTurn.is_null()),
             ),
         )
         .stream(conn)
@@ -199,11 +199,11 @@ where
         return Ok(true);
     }
 
-    let stream = crate::entities::card::Entity::find()
+    let stream = card::Entity::find()
         .filter(
-            crate::entities::card::Column::Id
+            card::Column::Id
                 .is_in(hands.keys().copied())
-                .and(crate::entities::card::Column::Color.eq(crate::entities::card::Color::White)),
+                .and(card::Column::Color.eq(card::Color::White)),
         )
         .stream(conn)
         .await?;
