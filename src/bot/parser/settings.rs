@@ -1,35 +1,40 @@
-use std::borrow::Cow;
-
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
     QuerySelect, TransactionTrait,
 };
 use tgbot::{
-    api::{Client, ExecuteError},
+    api::Client,
     types::{
         EditMessageReplyMarkup, InlineKeyboardButton, ParseMode, ReplyParameters, SendMessage, User,
     },
 };
 
 use crate::{
-    entities::{
-        chat::{self, Model as Chat},
-        chat_pack, pack, player,
-    },
+    entities::{chat, chat_pack, pack, player},
     Error,
 };
 
 const ENABLED: &str = "☑";
 const DISABLED: &str = "◻";
 
+#[derive(thiserror::Error, Debug)]
+pub enum SettingsError {
+    #[error("You're not the game owner, only {0} can use this command")]
+    NotOwner(String),
+    #[error("You can't change setting on an already started game")]
+    AlreadyStarter,
+    #[error(transparent)]
+    Chat(#[from] chat::ChatError),
+}
+
 pub async fn execute<C>(
     client: &Client,
     conn: &C,
     user: &User,
     message_id: i64,
-    chat: &Chat,
+    chat: &chat::Model,
     query_data: Option<&str>,
-) -> Result<Result<(), Cow<'static, str>>, Error>
+) -> Result<Result<(), SettingsError>, Error>
 where
     C: ConnectionTrait + TransactionTrait,
 {
@@ -45,6 +50,10 @@ where
         return Ok(Ok(()));
     };
 
+    if chat.turn > 1 {
+        return Ok(Err(SettingsError::AlreadyStarter));
+    }
+
     if chat.owner != Some(player.id) {
         // avoid spamming errors at every button clicked
         if query_data.is_none() {
@@ -55,17 +64,17 @@ where
                 return Ok(Ok(()));
             };
 
-            return Ok(Err(format!(
-                "You're not the game owner, only {} can use this command",
-                owner.tg_link()
-            )
-            .into()));
+            return Ok(Err(SettingsError::NotOwner(owner.tg_link())));
         } else {
             return Ok(Ok(()));
         }
     }
 
     let packs = pack::Entity::find().all(conn).await?;
+    let officials = packs
+        .iter()
+        .filter_map(|pack| pack.official.then_some(pack.id))
+        .collect::<Vec<_>>();
 
     let mut enabled = chat_pack::Entity::find()
         .filter(chat_pack::Column::ChatId.eq(chat.id))
@@ -74,13 +83,21 @@ where
         .into_tuple::<i32>()
         .all(conn)
         .await?;
+    let mut all_officials_enabled = officials.iter().all(|id| enabled.contains(id));
 
     let mut rando_carlissian = chat.rando_carlissian;
     let mut close = false;
     let mut start = 0;
     if let Some(data) = query_data {
         match data {
-            "rando" => {
+            "close" => {
+                close = true;
+            }
+            action if action.starts_with("skip") => {
+                start = action[4..].parse().unwrap_or_default();
+            }
+            action if action.starts_with("rando") => {
+                start = action[5..].parse().unwrap_or_default();
                 let txn = conn.begin().await?;
 
                 let chat = chat::ActiveModel {
@@ -92,7 +109,10 @@ where
                 .await?;
                 rando_carlissian = chat.rando_carlissian;
 
-                let msg = chat.reset(&txn).await?;
+                let msg = match chat.reset(&txn).await? {
+                    Ok(msg) => msg,
+                    Err(e) => return Ok(Err(SettingsError::from(e))),
+                };
                 txn.commit().await?;
 
                 if chat.players + chat.rando_carlissian as i32 > 2 {
@@ -111,26 +131,22 @@ where
                         .await?;
                 }
             }
-            "all" => {
-                for pack in &packs {
-                    if !enabled.contains(&pack.id) {
+            action if action.starts_with("all") => {
+                start = action[3..].parse().unwrap_or_default();
+                if packs.len() == enabled.len() {
+                    for pack in &packs {
                         chat_pack::ActiveModel {
                             chat_id: ActiveValue::Set(chat.id),
                             pack_id: ActiveValue::Set(pack.id),
                         }
-                        .insert(conn)
+                        .delete(conn)
                         .await?;
-                        enabled.push(pack.id);
                     }
-                }
-            }
-            "official" => {
-                for pack in &packs {
-                    match (
-                        pack.official,
-                        enabled.iter().position(|enabled_id| *enabled_id == pack.id),
-                    ) {
-                        (true, None) => {
+                    enabled.clear();
+                    all_officials_enabled = false;
+                } else {
+                    for pack in &packs {
+                        if !enabled.contains(&pack.id) {
                             chat_pack::ActiveModel {
                                 chat_id: ActiveValue::Set(chat.id),
                                 pack_id: ActiveValue::Set(pack.id),
@@ -139,27 +155,48 @@ where
                             .await?;
                             enabled.push(pack.id);
                         }
-                        (false, Some(index)) => {
+                    }
+                    all_officials_enabled = true;
+                }
+            }
+            action if action.starts_with("official") => {
+                start = action[8..].parse().unwrap_or_default();
+                if all_officials_enabled {
+                    for official in &officials {
+                        if let Some(index) =
+                            enabled.iter().position(|enabled_id| enabled_id == official)
+                        {
                             chat_pack::ActiveModel {
                                 chat_id: ActiveValue::Set(chat.id),
-                                pack_id: ActiveValue::Set(pack.id),
+                                pack_id: ActiveValue::Set(*official),
                             }
                             .delete(conn)
                             .await?;
                             enabled.remove(index);
                         }
-                        _ => {}
                     }
+                    all_officials_enabled = false;
+                } else {
+                    for official in &officials {
+                        if !enabled.contains(official) {
+                            chat_pack::ActiveModel {
+                                chat_id: ActiveValue::Set(chat.id),
+                                pack_id: ActiveValue::Set(*official),
+                            }
+                            .insert(conn)
+                            .await?;
+                            enabled.push(*official);
+                        }
+                    }
+                    all_officials_enabled = true;
                 }
             }
-            "close" => {
-                close = true;
-            }
-            action if action.starts_with("skip") => {
-                start = action[4..].parse().unwrap_or_default();
-            }
             id => {
-                if let Ok(id) = id.parse::<i32>() {
+                if let Some((Ok(id), s)) = id
+                    .split_once('-')
+                    .map(|(id, start)| (id.parse::<i32>(), start.parse().unwrap_or_default()))
+                {
+                    start = s;
                     if let Some(index) = enabled.iter().position(|enabled_id| *enabled_id == id) {
                         chat_pack::ActiveModel {
                             chat_id: ActiveValue::Set(chat.id),
@@ -192,15 +229,29 @@ where
                 crate::RANDO_CARLISSIAN,
                 if rando_carlissian { ENABLED } else { DISABLED }
             ),
-            "rando",
+            format!("rando{start}"),
         )]);
         keyboard.push(vec![InlineKeyboardButton::for_callback_data(
-            "Enable all packs",
-            "all",
+            format!(
+                "{} all packs",
+                if packs.len() == enabled.len() {
+                    "Disable"
+                } else {
+                    "Enable"
+                }
+            ),
+            format!("all{start}"),
         )]);
         keyboard.push(vec![InlineKeyboardButton::for_callback_data(
-            "Enable only official packs",
-            "official",
+            format!(
+                "{} official packs",
+                if all_officials_enabled {
+                    "Disable"
+                } else {
+                    "Enable"
+                }
+            ),
+            format!("official{start}"),
         )]);
         for pack in packs.iter().skip(start).take(15) {
             keyboard.push(vec![InlineKeyboardButton::for_callback_data(
@@ -213,7 +264,7 @@ where
                         DISABLED
                     }
                 ),
-                pack.id.to_string(),
+                format!("{}-{start}", pack.id),
             )]);
         }
         let mut buttons = Vec::new();
@@ -246,19 +297,12 @@ where
             )
             .await?;
     } else {
-        let res = client
+        client
             .execute(
                 EditMessageReplyMarkup::for_chat_message(chat.telegram_id, message_id)
                     .with_reply_markup(keyboard),
             )
-            .await;
-        // if the page displayed doesn't change, we get a futile error
-        if let Err(ExecuteError::Response(ref err)) = res {
-            if err.description().contains("message is not modified") {
-                return Ok(Ok(()));
-            }
-        }
-        res?;
+            .await?;
     }
 
     Ok(Ok(()))

@@ -4,8 +4,8 @@ use sea_orm::{
 use tgbot::{
     api::Client,
     types::{
-        AnswerInlineQuery, ChatPeerId, MaybeInaccessibleMessage, ParseMode, ReplyParameters,
-        SendMessage, User,
+        AnswerInlineQuery, Chat, MaybeInaccessibleMessage, ParseMode, ReplyParameters, SendMessage,
+        User,
     },
 };
 
@@ -23,6 +23,22 @@ mod settings;
 mod start;
 mod status;
 
+#[derive(thiserror::Error, Debug)]
+enum BotError {
+    #[error(transparent)]
+    Chat(#[from] chat::ChatError),
+    #[error(transparent)]
+    Hand(#[from] hand::PickError),
+    #[error(transparent)]
+    Start(#[from] start::StartError),
+    #[error(transparent)]
+    Settings(#[from] settings::SettingsError),
+    #[error(transparent)]
+    Status(#[from] status::StatusError),
+    #[error(transparent)]
+    Close(#[from] close::CloseError),
+}
+
 pub async fn parse_message<C>(
     client: &Client,
     conn: &C,
@@ -30,30 +46,39 @@ pub async fn parse_message<C>(
     user: &User,
     message_id: i64,
     msg: &str,
-    chat_id: ChatPeerId,
+    tg_chat: &Chat,
 ) -> Result<(), Error>
 where
     C: ConnectionTrait + StreamTrait + TransactionTrait,
 {
-    let chat = chat::find_or_insert(conn, chat_id).await?;
-
-    let mut iter = msg.split_whitespace();
-    let res = match iter.next().map(|msg| msg.strip_suffix(name).unwrap_or(msg)) {
-        Some("/help") => help::execute(client, message_id, &chat, name)
-            .await
-            .map(Ok)?,
-        Some("/start") => start::execute(client, conn, user, message_id, &chat).await?,
-        Some("/settings") => settings::execute(client, conn, user, message_id, &chat, None).await?,
-        Some("/status") => status::execute(client, conn, message_id, &chat).await?,
-        Some("/rank") => rank::execute(client, conn, message_id, &chat).await?,
-        Some("/close") => close::execute(client, conn, user, message_id, &chat).await?,
-        _ => return Ok(()),
+    let res = match chat::find_or_insert(conn, tg_chat).await? {
+        Ok(chat) => {
+            let mut iter = msg.split_whitespace();
+            match iter.next().map(|msg| msg.strip_suffix(name).unwrap_or(msg)) {
+                Some("/help") => Ok(help::execute(client, message_id, &chat, name).await?),
+                Some("/start") => start::execute(client, conn, user, message_id, &chat)
+                    .await?
+                    .map_err(BotError::from),
+                Some("/settings") => settings::execute(client, conn, user, message_id, &chat, None)
+                    .await?
+                    .map_err(BotError::from),
+                Some("/status") => status::execute(client, conn, message_id, &chat)
+                    .await?
+                    .map_err(BotError::from),
+                Some("/rank") => Ok(rank::execute(client, conn, message_id, &chat).await?),
+                Some("/close") => close::execute(client, conn, user, message_id, &chat)
+                    .await?
+                    .map_err(BotError::from),
+                _ => return Ok(()),
+            }
+        }
+        Err(e) => Err(BotError::from(e)),
     };
 
     if let Err(err) = res {
         client
             .execute(
-                SendMessage::new(chat.telegram_id, format!("Error: {err}"))
+                SendMessage::new(tg_chat.get_id(), format!("Error: {err}"))
                     .with_reply_parameters(ReplyParameters::new(message_id))
                     .with_parse_mode(ParseMode::Markdown),
             )
@@ -73,18 +98,22 @@ pub async fn parse_callback_query<C>(
 where
     C: ConnectionTrait + StreamTrait + TransactionTrait,
 {
-    let (chat_id, message_id) = match message {
-        MaybeInaccessibleMessage::InaccessibleMessage(im) => (im.chat.get_id(), im.message_id),
-        MaybeInaccessibleMessage::Message(m) => (m.chat.get_id(), m.id),
+    let (tg_chat, message_id) = match message {
+        MaybeInaccessibleMessage::InaccessibleMessage(im) => (&im.chat, im.message_id),
+        MaybeInaccessibleMessage::Message(m) => (&m.chat, m.id),
     };
-    let chat = chat::find_or_insert(conn, chat_id).await?;
 
-    let res = settings::execute(client, conn, user, message_id, &chat, Some(data)).await?;
+    let res = match chat::find_or_insert(conn, tg_chat).await? {
+        Ok(chat) => settings::execute(client, conn, user, message_id, &chat, Some(data))
+            .await?
+            .map_err(BotError::from),
+        Err(e) => Err(BotError::from(e)),
+    };
 
     if let Err(err) = res {
         client
             .execute(
-                SendMessage::new(chat.telegram_id, format!("Error: {err}"))
+                SendMessage::new(tg_chat.get_id(), format!("Error: {err}"))
                     .with_reply_parameters(ReplyParameters::new(message_id))
                     .with_parse_mode(ParseMode::Markdown),
             )
@@ -142,7 +171,11 @@ pub async fn parse_inline_query_response<C>(
 where
     C: ConnectionTrait + StreamTrait + TransactionTrait,
 {
+    // remove anything after a ';' then split it by whitespace and convert to i32
     let Ok(hand_ids) = result_id
+        .split_once(';')
+        .map(|(s, _)| s)
+        .unwrap_or(result_id)
         .split_whitespace()
         .map(|s| s.parse::<i32>())
         .collect::<Result<Vec<_>, _>>()

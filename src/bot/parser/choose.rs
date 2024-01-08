@@ -1,6 +1,6 @@
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QuerySelect, TransactionTrait,
+    QuerySelect, StreamTrait, TransactionTrait,
 };
 use tgbot::{
     api::Client,
@@ -19,7 +19,7 @@ pub async fn execute<C>(
     hands: &[hand::Model],
 ) -> Result<(), Error>
 where
-    C: ConnectionTrait + TransactionTrait,
+    C: ConnectionTrait + TransactionTrait + StreamTrait,
 {
     let mut chat_ids = hands.iter().map(|hand| hand.chat_id).collect::<Vec<_>>();
     chat_ids.dedup();
@@ -44,15 +44,28 @@ where
     };
 
     // when you're the judge
-    if player.is_my_turn(&chat) {
-        as_judge(client, conn, &chat, hands).await
+    let res = if player.is_my_turn(&chat) {
+        as_judge(client, conn, &chat, hands).await?
     } else {
         if hands.len() != 1 {
             return Ok(());
         }
 
-        as_player(client, conn, &player, &chat, &hands[0]).await
+        as_player(client, conn, &player, &chat, &hands[0]).await?
+    };
+
+    if let Err(e) = res {
+        let msg = match chat.close(conn).await? {
+            Ok(msg) => format!("{e}\n\n{msg}"),
+            Err(err) => format!("{e}\n\nError: {err}"),
+        };
+
+        client
+            .execute(SendMessage::new(chat.telegram_id, msg).with_parse_mode(ParseMode::Markdown))
+            .await?;
     }
+
+    Ok(())
 }
 
 async fn as_judge<C>(
@@ -60,7 +73,7 @@ async fn as_judge<C>(
     conn: &C,
     chat: &chat::Model,
     hands: &[hand::Model],
-) -> Result<(), Error>
+) -> Result<Result<(), chat::ChatError>, Error>
 where
     C: ConnectionTrait + TransactionTrait,
 {
@@ -72,13 +85,13 @@ where
         .collect::<Vec<_>>();
     player_ids.dedup();
     if player_ids.len() != 1 {
-        return Ok(());
+        return Ok(Ok(()));
     }
     let player_id = player_ids[0];
 
     if player_id > 0 {
         let Some(player) = player::Entity::find_by_id(player_id).one(&txn).await? else {
-            return Ok(());
+            return Ok(Ok(()));
         };
 
         player::ActiveModel {
@@ -108,7 +121,10 @@ where
     .update(&txn)
     .await?;
 
-    let msg = chat.reset(&txn).await?;
+    let msg = match chat.reset(&txn).await? {
+        Ok(msg) => msg,
+        Err(e) => return Ok(Err(e)),
+    };
     txn.commit().await?;
 
     client
@@ -124,7 +140,7 @@ where
         )
         .await?;
 
-    Ok(())
+    Ok(Ok(()))
 }
 
 async fn as_player<C>(
@@ -133,7 +149,7 @@ async fn as_player<C>(
     player: &player::Model,
     chat: &chat::Model,
     hand: &hand::Model,
-) -> Result<(), Error>
+) -> Result<Result<(), chat::ChatError>, Error>
 where
     C: ConnectionTrait,
 {
@@ -152,7 +168,7 @@ where
         .flatten()
         .unwrap_or_default();
     if played >= chat.pick as i64 {
-        return Ok(());
+        return Ok(Ok(()));
     }
 
     hand::ActiveModel {
@@ -190,7 +206,7 @@ where
             .one(conn)
             .await?
         else {
-            return Ok(());
+            return Ok(Ok(()));
         };
 
         let msg = format!(
@@ -213,5 +229,5 @@ where
             .await?;
     }
 
-    Ok(())
+    Ok(Ok(()))
 }

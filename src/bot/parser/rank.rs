@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use futures_util::TryStreamExt;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, StreamTrait,
@@ -10,7 +8,7 @@ use tgbot::{
 };
 
 use crate::{
-    entities::{chat::Model as Chat, hand, player},
+    entities::{chat, hand, player},
     Error,
 };
 
@@ -18,8 +16,8 @@ pub async fn execute<C>(
     client: &Client,
     conn: &C,
     message_id: i64,
-    chat: &Chat,
-) -> Result<Result<(), Cow<'static, str>>, Error>
+    chat: &chat::Model,
+) -> Result<(), Error>
 where
     C: ConnectionTrait + StreamTrait,
 {
@@ -77,5 +75,5 @@ where
         )
         .await?;
 
-    Ok(Ok(()))
+    Ok(())
 }

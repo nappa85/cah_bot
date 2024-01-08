@@ -10,20 +10,25 @@ use tgbot::{
 };
 
 use crate::{
-    entities::{
-        chat::{self, Model as Chat},
-        player,
-    },
+    entities::{chat, player},
     Error,
 };
+
+#[derive(thiserror::Error, Debug)]
+pub enum StartError {
+    #[error("Player already exists")]
+    AlreadyExists,
+    #[error(transparent)]
+    Chat(#[from] chat::ChatError),
+}
 
 pub async fn execute<C>(
     client: &Client,
     conn: &C,
     user: &User,
     message_id: i64,
-    chat: &Chat,
-) -> Result<Result<(), Cow<'static, str>>, Error>
+    chat: &chat::Model,
+) -> Result<Result<(), StartError>, Error>
 where
     C: ConnectionTrait + TransactionTrait,
 {
@@ -37,7 +42,7 @@ where
         .await?
         .is_some()
     {
-        return Ok(Err("Player already exists".into()));
+        return Ok(Err(StartError::AlreadyExists));
     }
 
     let txn = conn.begin().await?;
@@ -76,7 +81,10 @@ where
             _ => Cow::Borrowed(""),
         },
         if chat.players + chat.rando_carlissian as i32 > 2 {
-            chat.reset(&txn).await?
+            match chat.reset(&txn).await? {
+                Ok(msg) => msg,
+                Err(e) => return Ok(Err(StartError::from(e))),
+            }
         } else {
             String::new()
         }

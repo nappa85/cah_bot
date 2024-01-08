@@ -11,7 +11,7 @@ use tgbot::{
 };
 
 use crate::{
-    entities::{card, chat::Model as Chat, hand, player},
+    entities::{card, chat, hand, player},
     Error,
 };
 
@@ -20,7 +20,7 @@ pub async fn execute<C>(
     conn: &C,
     user: &User,
     query_id: &str,
-    chat: &Chat,
+    chat: &chat::Model,
 ) -> Result<bool, Error>
 where
     C: ConnectionTrait + StreamTrait,
@@ -55,7 +55,7 @@ async fn as_judge<C>(
     conn: &C,
     player: &player::Model,
     query_id: &str,
-    chat: &Chat,
+    chat: &chat::Model,
 ) -> Result<bool, Error>
 where
     C: ConnectionTrait + StreamTrait,
@@ -130,7 +130,7 @@ where
 
     let inline = hands
         .into_iter()
-        .map(|(player_id, hand)| {
+        .flat_map(|(player_id, hand)| {
             let player = &players[&player_id];
             let len = hand.len();
             let (hand_ids, hand_texts) = hand.into_iter().fold(
@@ -142,18 +142,54 @@ where
                 },
             );
 
-            InlineQueryResult::Article(InlineQueryResultArticle::new(
-                hand_ids.join(" "),
-                InputMessageContentText::new(format!(
-                    "*{}*\n\nI've choosen {}'s card{}:\n\n*{}*",
-                    cards[&judge_card],
-                    player,
-                    if len > 1 { "s" } else { "" },
-                    hand_texts.join("\n")
+            // split text in multiple lines if needed
+            // official line limit is 127 chars
+            // but text is trucated based on screen width
+            // so we'll use 50 chars to better fit screen
+            //
+            // Telegram doesn't accept multiple inputs with the same id
+            // so we are appending a ";{index}"
+            let text = hand_texts.join(" - ");
+            let text_len = text.chars().count();
+            let id = hand_ids.join(" ");
+            let lines = if text_len > 50 {
+                text.split_whitespace()
+                    .fold(Vec::<(String, String)>::new(), |mut acc, word| {
+                        if let Some((_, last)) = acc.last_mut() {
+                            if last.chars().count() + 1 + word.chars().count() > 50 {
+                                acc.push((
+                                    format!("{id};{}", acc.len()),
+                                    format!("{}: {word}", acc.len() + 1),
+                                ));
+                            } else {
+                                last.push(' ');
+                                last.push_str(word)
+                            }
+                        } else {
+                            acc.push((format!("{id};0"), format!("1: {word}")));
+                        }
+                        acc
+                    })
+            } else {
+                vec![(id, text)]
+            };
+
+            let black_card = &cards[&judge_card];
+            let text = hand_texts.join("\n");
+            lines.into_iter().map(move |(id, line)| {
+                InlineQueryResult::Article(InlineQueryResultArticle::new(
+                    id,
+                    InputMessageContentText::new(format!(
+                        "*{}*\n\nI've choosen {}'s card{}:\n\n*{}*",
+                        black_card,
+                        player,
+                        if len > 1 { "s" } else { "" },
+                        text
+                    ))
+                    .with_parse_mode(ParseMode::Markdown),
+                    line,
                 ))
-                .with_parse_mode(ParseMode::Markdown),
-                hand_texts.join(" - "),
-            ))
+            })
         })
         .collect::<Vec<_>>();
 
@@ -169,7 +205,7 @@ async fn as_player<C>(
     conn: &C,
     player: &player::Model,
     query_id: &str,
-    chat: &Chat,
+    chat: &chat::Model,
 ) -> Result<bool, Error>
 where
     C: ConnectionTrait + StreamTrait,

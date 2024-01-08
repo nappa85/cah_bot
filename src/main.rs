@@ -9,6 +9,7 @@ mod entities;
 const PACKS: &str = include_str!("../cah-cards-full.json");
 static RANDO_CARLISSIAN: &str = "Rando Carlissian";
 
+// those are all unrecoverable errors
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Missing env var BOT_TOKEN")]

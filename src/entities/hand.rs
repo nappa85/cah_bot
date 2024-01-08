@@ -58,13 +58,22 @@ pub enum Color {
     White,
 }
 
-pub async fn draw<C>(
+#[allow(clippy::enum_variant_names)]
+#[derive(thiserror::Error, Debug)]
+pub enum PickError {
+    #[error("There are no more black cards available")]
+    NoMoreBlackCards,
+    #[error("There are no more white cards available")]
+    NoMoreWhiteCards,
+}
+
+pub async fn pick<C>(
     conn: &C,
     player_id: i32,
     chat_id: i32,
     turn: i32,
-    draw_black: bool,
-) -> Result<Option<card::Model>, Error>
+    pick_black: bool,
+) -> Result<Result<Option<card::Model>, PickError>, Error>
 where
     C: ConnectionTrait,
 {
@@ -84,18 +93,22 @@ where
         .all(conn)
         .await?;
 
-    let black_cards = if draw_black {
-        Some(
-            card::Entity::find()
-                .filter(
-                    card::Column::Color
-                        .eq(card::Color::Black)
-                        .and(card::Column::Id.is_not_in(already_picked.clone()))
-                        .and(card::Column::PackId.is_in(enabled_packs.clone())),
-                )
-                .all(conn)
-                .await?,
-        )
+    let black_cards = if pick_black {
+        let black_cards = card::Entity::find()
+            .filter(
+                card::Column::Color
+                    .eq(card::Color::Black)
+                    .and(card::Column::Id.is_not_in(already_picked.clone()))
+                    .and(card::Column::PackId.is_in(enabled_packs.clone())),
+            )
+            .all(conn)
+            .await?;
+
+        if black_cards.is_empty() {
+            return Ok(Err(PickError::NoMoreBlackCards));
+        }
+
+        Some(black_cards)
     } else {
         None
     };
@@ -112,6 +125,9 @@ where
         .into_tuple::<i32>()
         .all(conn)
         .await?;
+    if white_cards.is_empty() {
+        return Ok(Err(PickError::NoMoreWhiteCards));
+    }
 
     // rando carlissian hack
     let player_cards = if player_id > 0 {
@@ -168,5 +184,5 @@ where
         }
     }
 
-    Ok(res)
+    Ok(Ok(res))
 }

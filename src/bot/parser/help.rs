@@ -3,12 +3,12 @@ use tgbot::{
     types::{InlineKeyboardButton, ParseMode, ReplyParameters, SendMessage},
 };
 
-use crate::{entities::chat::Model as Chat, Error};
+use crate::{entities::chat, Error};
 
 pub async fn execute(
     client: &Client,
     message_id: i64,
-    chat: &Chat,
+    chat: &chat::Model,
     bot_name: &str,
 ) -> Result<(), Error> {
     client
@@ -21,11 +21,11 @@ pub async fn execute(
 /close - close the game and get a winner
 /help - this message
 /start - start or join the game in this chat
-/settings - change game setting for this chat
+/settings - change game setting
 /status - show game status
 /rank - show players ranking
 
-To view you hand and choose a card for this chat always use the inline command `@{bot_name} {}`
+To view you hand and choose a card for this game use the inline command `@{bot_name} {}`
                 ",
                     chat.id
                 ),

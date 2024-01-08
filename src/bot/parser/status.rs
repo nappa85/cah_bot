@@ -8,21 +8,35 @@ use tgbot::{
 };
 
 use crate::{
-    entities::{card, chat::Model as Chat, hand, player},
+    entities::{card, chat, hand, player},
     Error,
 };
+
+#[derive(thiserror::Error, Debug)]
+pub enum StatusError {
+    #[error("Not enough players in the game")]
+    NotEnoughPlayers,
+    #[error("No judge in game (this is a bug)")]
+    NoJudge,
+    #[error("No black card in game (this is a bug)")]
+    NoBlackCard,
+    #[error("Multiple black card in game (this is a bug)")]
+    MultiBlackCard,
+    #[error("Invalid black card in game (this is a bug)")]
+    InvalidBlackCard,
+}
 
 pub async fn execute<C>(
     client: &Client,
     conn: &C,
     message_id: i64,
-    chat: &Chat,
-) -> Result<Result<(), Cow<'static, str>>, Error>
+    chat: &chat::Model,
+) -> Result<Result<(), StatusError>, Error>
 where
     C: ConnectionTrait + StreamTrait,
 {
     if 3 > chat.players + chat.rando_carlissian as i32 {
-        return Ok(Err("Not enough players in the game".into()));
+        return Ok(Err(StatusError::NotEnoughPlayers));
     }
 
     let stream = player::Entity::find()
@@ -41,7 +55,7 @@ where
         .await?;
 
     let Some(judge) = judge else {
-        return Ok(Err("No judge in game".into()));
+        return Ok(Err(StatusError::NoJudge));
     };
 
     if chat.rando_carlissian {
@@ -69,17 +83,17 @@ where
         .await?;
 
     let Some(judge_cards) = cards.get(&judge.id) else {
-        return Ok(Err("No black card in game".into()));
+        return Ok(Err(StatusError::NoBlackCard));
     };
     if judge_cards.len() != 1 {
-        return Ok(Err("Multiple black card in game".into()));
+        return Ok(Err(StatusError::MultiBlackCard));
     }
     let Some(black_card) = card::Entity::find_by_id(judge_cards[0])
         .filter(card::Column::Color.eq(card::Color::Black))
         .one(conn)
         .await?
     else {
-        return Ok(Err("Invalid black card in game".into()));
+        return Ok(Err(StatusError::InvalidBlackCard));
     };
 
     let mut msg = format!(

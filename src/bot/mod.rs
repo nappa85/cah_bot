@@ -40,8 +40,7 @@ where
                     data: MessageData::Text(Text { ref data, .. }),
                     ..
                 }) => {
-                    parser::parse_message(&client, conn, name, user, id, data, chat.get_id())
-                        .await?;
+                    parser::parse_message(&client, conn, name, user, id, data, chat).await?;
                 }
                 UpdateType::InlineQuery(InlineQuery {
                     ref id, ref query, ..

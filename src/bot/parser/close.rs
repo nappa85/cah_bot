@@ -1,31 +1,31 @@
-use std::borrow::Cow;
-
-use chrono::Utc;
-use futures_util::TryStreamExt;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QueryOrder, QuerySelect, StreamTrait,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, StreamTrait};
 use tgbot::{
     api::Client,
     types::{ParseMode, ReplyParameters, SendMessage, User},
 };
 
 use crate::{
-    entities::{
-        chat::{self, Model as Chat},
-        hand, player,
-    },
+    entities::{chat, player},
     Error,
 };
+
+#[derive(thiserror::Error, Debug)]
+pub enum CloseError {
+    #[error("You're not the game owner, only {0} can use this command")]
+    NotOwner(String),
+    #[error("You can't close an unstarted game")]
+    Unstarted,
+    #[error(transparent)]
+    Chat(#[from] chat::ChatError),
+}
 
 pub async fn execute<C>(
     client: &Client,
     conn: &C,
     user: &User,
     message_id: i64,
-    chat: &Chat,
-) -> Result<Result<(), Cow<'static, str>>, Error>
+    chat: &chat::Model,
+) -> Result<Result<(), CloseError>, Error>
 where
     C: ConnectionTrait + StreamTrait,
 {
@@ -49,78 +49,16 @@ where
             return Ok(Ok(()));
         };
 
-        return Ok(Err(format!(
-            "You're not the game owner, only {} can use this command",
-            owner.tg_link()
-        )
-        .into()));
+        return Ok(Err(CloseError::NotOwner(owner.tg_link())));
     }
 
-    let stream = player::Entity::find()
-        .filter(
-            player::Column::ChatId
-                .eq(chat.id)
-                .and(player::Column::Points.gt(0)),
-        )
-        .order_by_desc(player::Column::Points)
-        .stream(conn)
-        .await?;
-
-    let mut players = stream
-        .map_ok(|player| (player.points as i64, Cow::Owned(player.tg_link())))
-        .try_collect::<Vec<_>>()
-        .await?;
-
-    if chat.rando_carlissian {
-        let won = hand::Entity::find()
-            .filter(
-                hand::Column::ChatId
-                    .eq(chat.id)
-                    .and(hand::Column::PlayerId.eq(0))
-                    .and(hand::Column::Won.eq(true)),
-            )
-            .select_only()
-            .column_as(hand::Column::Id.count(), "ids")
-            .into_tuple::<Option<i64>>()
-            .one(conn)
-            .await?
-            .flatten()
-            .unwrap_or_default();
-        if won > 0 {
-            players.push((won, Cow::Borrowed(crate::RANDO_CARLISSIAN)));
-            players.sort_by(|(points_a, _), (points_b, _)| points_b.cmp(points_a));
-        }
+    if chat.turn <= 1 {
+        return Ok(Err(CloseError::Unstarted));
     }
 
-    let msg = if players.is_empty() {
-        String::from("Error: you can't close an unstarted game")
-    } else {
-        chat::ActiveModel {
-            id: ActiveValue::Set(chat.id),
-            end_date: ActiveValue::Set(Some(Utc::now().naive_utc())),
-            ..Default::default()
-        }
-        .update(conn)
-        .await?;
-
-        let winner_points = players[0].0;
-        let winners = players
-            .into_iter()
-            .map_while(|(points, player)| (points == winner_points).then_some(player))
-            .collect::<Vec<_>>();
-
-        format!(
-            "After {} turns the winner{} {} with {} points{}",
-            chat.turn - 1,
-            if winners.len() > 1 { "s are" } else { " is" },
-            winners.join(" and "),
-            winner_points,
-            if winners.len() == 1 && winners[0] == crate::RANDO_CARLISSIAN {
-                "\n\n*SHAME ON YOU!!!*"
-            } else {
-                ""
-            }
-        )
+    let msg = match chat.close(conn).await? {
+        Ok(msg) => msg,
+        Err(e) => return Ok(Err(CloseError::from(e))),
     };
 
     client
