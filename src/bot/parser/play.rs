@@ -1,6 +1,7 @@
-use std::{borrow::Cow, collections::HashMap, future};
+use std::{borrow::Cow, collections::HashMap, future, option::IntoIter};
 
 use futures_util::TryStreamExt;
+use rand::Rng;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, StreamTrait};
 use tgbot::{
     api::Client,
@@ -15,19 +16,140 @@ use crate::{
     Error,
 };
 
+static SILLY_RESPONSES: &[&str] = &[
+    "I'm a silly person and I press on errors",
+    "Are you gonna eat that?",
+    "If I close my eyes I can't see you!",
+    "I'm reviewing my life",
+    "Now I'm in a good mood",
+    "I want to be better, I swear!",
+    "If you had my life, you'd be happy too",
+    "There's a lot in my head",
+    "I stay up late thinking about it and it's overwhelming",
+    "Everything is awesome! Like awesome awesome awesome awesome awesome awesome-er than before!",
+    "I'm on the verge of tears, but it's okay",
+    "I have a lot to cry about",
+    "It all depends on how YOU feel...",
+    "Oh, I'm not fine",
+    "I don't want to talk about it",
+    "Crazy is one-word people should use to describe me",
+    "I have too much on my mind right now",
+    "I'm on the road to being awesome",
+    "It's been a while since I've been great",
+    "I'm more of a dog person",
+    "Asking me is like asking an apple how it feels about oranges",
+    "I'm more of a cat person",
+    "I am so overwhelmed right now, I think my brain is going to explode",
+    "I'm in a good mood, but not great",
+    "I'm in a bad mood, but it's okay because I don't want to make you feel awkward by telling you how much better I would be if you weren't here right now",
+    "People always say that you shouldn't complain about your life, but what else should I talk about?",
+    "I just had a deep conversation with myself",
+    "I don't think that it went very well",
+    "Good Morning! Now that I have woken up, my day is ruined",
+    "It's hard to wake up in the morning when you're always tired",
+    "I am like a box of chocolates; nobody knows what they're going to get",
+    "I feel like a chicken in a burger factory",
+    "My favorite phrase is “it could be worse”",
+    "I'm feeling pretty good about myself, though I can't quite remember why right now",
+    "My therapist told me to stay off the internet until she approves my new profile picture",
+    "There are times when I sit and look at my hands and wonder, “What if they were feet?”",
+    "Happiness is just around the corner...let's go around again!",
+    "I wish I had the energy of a newborn baby...oh, wait. That would require getting out of bed",
+    "I would say that I don't have enough information to answer “how are you”, but that wouldn't be true",
+    "The difference between “I’m fine” and “I’ve been better” is about 3 coffees",
+    "I tried to think of something deep and meaningful, but I thought too hard and hurt myself",
+    "I just remembered what you said and then apparently forgot again",
+    "I’m good because I listen to Katy Perry",
+    "I’ve been pretty well, but then I woke up and realized that was all a dream",
+    "I’m bad at directions so it’s difficult for me to tell",
+    "I’m not sure, you tell me",
+    "I haven’t done anything particularly noteworthy",
+    "Sometimes, words are not necessary",
+    "Nobody tells me how to live my life!",
+    "I’m happy because today I saw a dog wearing sunglasses and it was adorable!",
+    "Just another day in my wonderful life",
+    "If you check out enough monkeys, sooner or later one of them will start typing Shakespeare",
+    "They're taking the hobbits to Isengard!",
+    "In case you haven’t noticed, I’m weird. I’m a weirdo",
+    "Supercalifragilisticexpialidocious!",
+    "May the Force be with you",
+    "There's no place like home",
+    "I’m the king of the world!",
+    "My mama always said life was like a box of chocolates. You never know what you're gonna get",
+    "You're gonna need a bigger boat",
+    "My precious!",
+    "Houston, we have a problem",
+    "E.T. phone home",
+    "You can't handle the truth!",
+    "A martini. Shaken, not stirred",
+    "I am your father",
+    "What we've got here is failure to communicate",
+    "Hasta la vista, baby",
+    "Bond. James Bond",
+    "Roads? Where we're going we don't need roads",
+    "Nobody puts Baby in a corner",
+    "Well, nobody's perfect",
+    "They may take our lives, but they'll never take our freedom!",
+    "To infinity and beyond!",
+    "Toto, I've a feeling we're not in Kansas anymore",
+    "Harambe died for our sins!",
+];
+
+#[derive(thiserror::Error, Debug)]
+pub enum PlayError {
+    #[error("")]
+    Clear,
+    #[error("🛑 This game have been closed")]
+    GameEnded,
+    #[error("⚠️ Not enough players in the game")]
+    NotEnoughPlayers,
+    #[error("⛔ You're not part of this game, use /start to join")]
+    PlayerNotFound,
+    #[error("🪳 No black card in game (this is a bug)")]
+    NoBlackCard,
+    #[error("⏳ It's not your turn to play")]
+    NotJudgeTurn,
+    #[error("⌛ You already played this turn")]
+    AlreadyPlayed,
+}
+
+impl IntoIterator for PlayError {
+    type Item = InlineQueryResult;
+    type IntoIter = IntoIter<InlineQueryResult>;
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            PlayError::Clear => None.into_iter(),
+            err => {
+                let mut rng = rand::thread_rng();
+                let index = rng.gen_range(0..SILLY_RESPONSES.len());
+                Some(InlineQueryResult::Article(InlineQueryResultArticle::new(
+                    ";",
+                    InputMessageContentText::new(SILLY_RESPONSES[index]),
+                    err.to_string(),
+                )))
+                .into_iter()
+            }
+        }
+    }
+}
+
 pub async fn execute<C>(
     client: &Client,
     conn: &C,
     user: &User,
     query_id: &str,
     chat: &chat::Model,
-) -> Result<bool, Error>
+) -> Result<Result<(), PlayError>, Error>
 where
     C: ConnectionTrait + StreamTrait,
 {
+    if chat.end_date.is_some() {
+        return Ok(Err(PlayError::GameEnded));
+    }
+
     // rando carlissian counts as a player
     if 3 > chat.players + chat.rando_carlissian as i32 {
-        return Ok(true);
+        return Ok(Err(PlayError::NotEnoughPlayers));
     }
 
     let Some(player) = player::Entity::find()
@@ -39,7 +161,7 @@ where
         .one(conn)
         .await?
     else {
-        return Ok(true);
+        return Ok(Err(PlayError::PlayerNotFound));
     };
 
     // when you're the judge
@@ -56,7 +178,7 @@ async fn as_judge<C>(
     player: &player::Model,
     query_id: &str,
     chat: &chat::Model,
-) -> Result<bool, Error>
+) -> Result<Result<(), PlayError>, Error>
 where
     C: ConnectionTrait + StreamTrait,
 {
@@ -73,7 +195,7 @@ where
         .try_collect::<HashMap<_, _>>()
         .await?;
     if players.is_empty() {
-        return Ok(true);
+        return Ok(Err(PlayError::NotEnoughPlayers));
     }
     if chat.rando_carlissian {
         players.insert(0, Cow::Borrowed(crate::RANDO_CARLISSIAN));
@@ -103,11 +225,11 @@ where
         )
         .await?;
     let Some(judge_card) = judge_card else {
-        return Ok(true);
+        return Ok(Err(PlayError::NoBlackCard));
     };
     if hands.len() < players.len() || hands.values().map(Vec::len).min() < Some(chat.pick as usize)
     {
-        return Ok(true);
+        return Ok(Err(PlayError::NotJudgeTurn));
     }
 
     let stream = card::Entity::find()
@@ -197,7 +319,7 @@ where
         .execute(AnswerInlineQuery::new(query_id, inline).with_cache_time(0))
         .await?;
 
-    Ok(false)
+    Ok(Ok(()))
 }
 
 async fn as_player<C>(
@@ -206,7 +328,7 @@ async fn as_player<C>(
     player: &player::Model,
     query_id: &str,
     chat: &chat::Model,
-) -> Result<bool, Error>
+) -> Result<Result<(), PlayError>, Error>
 where
     C: ConnectionTrait + StreamTrait,
 {
@@ -232,7 +354,7 @@ where
         })
         .await?;
     if played >= chat.pick {
-        return Ok(true);
+        return Ok(Err(PlayError::AlreadyPlayed));
     }
 
     let stream = card::Entity::find()
@@ -262,5 +384,5 @@ where
         .execute(AnswerInlineQuery::new(query_id, cards).with_cache_time(0))
         .await?;
 
-    Ok(false)
+    Ok(Ok(()))
 }

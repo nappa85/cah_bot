@@ -133,9 +133,9 @@ pub async fn parse_inline_query<C>(
 where
     C: ConnectionTrait + StreamTrait + TransactionTrait,
 {
-    if parse_inline_query_inner(client, conn, user, query_id, msg).await? {
+    if let Err(err) = parse_inline_query_inner(client, conn, user, query_id, msg).await? {
         client
-            .execute(AnswerInlineQuery::new(query_id, []).with_cache_time(0))
+            .execute(AnswerInlineQuery::new(query_id, err).with_cache_time(0))
             .await?;
     }
 
@@ -148,15 +148,15 @@ async fn parse_inline_query_inner<C>(
     user: &User,
     query_id: &str,
     msg: &str,
-) -> Result<bool, Error>
+) -> Result<Result<(), play::PlayError>, Error>
 where
     C: ConnectionTrait + StreamTrait + TransactionTrait,
 {
     let Ok(chat_id) = msg.parse::<i32>() else {
-        return Ok(true);
+        return Ok(Err(play::PlayError::Clear));
     };
     let Some(chat) = chat::Entity::find_by_id(chat_id).one(conn).await? else {
-        return Ok(true);
+        return Ok(Err(play::PlayError::Clear));
     };
 
     play::execute(client, conn, user, query_id, &chat).await
@@ -182,6 +182,9 @@ where
     else {
         return Ok(());
     };
+    if hand_ids.is_empty() {
+        return Ok(());
+    }
 
     let len = hand_ids.len();
     let hands = hand::Entity::find()
