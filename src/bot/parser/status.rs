@@ -104,7 +104,7 @@ where
     );
     for player in players {
         msg.push_str(&format!(
-            "\n{} have{} played{}",
+            "\n{} has{} played{}",
             player.1,
             if cards.contains_key(&player.0) {
                 ""

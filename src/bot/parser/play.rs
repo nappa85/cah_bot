@@ -1,13 +1,15 @@
 use std::{borrow::Cow, collections::HashMap, future, option::IntoIter};
 
-use futures_util::TryStreamExt;
+use futures_util::{stream, TryStreamExt};
 use rand::Rng;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, StreamTrait};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder, StreamTrait,
+};
 use tgbot::{
     api::Client,
     types::{
-        AnswerInlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContentText,
-        ParseMode, User,
+        AnswerInlineQuery, InlineKeyboardButton, InlineQueryResult, InlineQueryResultArticle,
+        InputMessageContentText, ParseMode, User,
     },
 };
 
@@ -264,37 +266,7 @@ where
                 },
             );
 
-            // split text in multiple lines if needed
-            // official line limit is 127 chars
-            // but text is trucated based on screen width
-            // so we'll use 50 chars to better fit screen
-            //
-            // Telegram doesn't accept multiple inputs with the same id
-            // so we are appending a ";{index}"
-            let text = hand_texts.join(" - ");
-            let text_len = text.chars().count();
-            let id = hand_ids.join(" ");
-            let lines = if text_len > 50 {
-                text.split_whitespace()
-                    .fold(Vec::<(String, String)>::new(), |mut acc, word| {
-                        if let Some((_, last)) = acc.last_mut() {
-                            if last.chars().count() + 1 + word.chars().count() > 50 {
-                                acc.push((
-                                    format!("{id};{}", acc.len()),
-                                    format!("{}: {word}", acc.len() + 1),
-                                ));
-                            } else {
-                                last.push(' ');
-                                last.push_str(word)
-                            }
-                        } else {
-                            acc.push((format!("{id};0"), format!("1: {word}")));
-                        }
-                        acc
-                    })
-            } else {
-                vec![(id, text)]
-            };
+            let lines = split_multiline_cards(hand_texts.join(" - "), hand_ids.join(" "));
 
             let black_card = &cards[&judge_card];
             let text = hand_texts.join("\n");
@@ -367,16 +339,34 @@ where
         .await?;
     let cards = stream
         .map_ok(|card| {
-            InlineQueryResult::Article(InlineQueryResultArticle::new(
-                hands[&card.id].to_string(),
-                if chat.pick == 1 {
-                    InputMessageContentText::new("I've choosen my card")
+            let lines = split_multiline_cards(card.text, hands[&card.id].to_string());
+
+            stream::iter(lines.into_iter().map(|(id, text)| {
+                let res = InlineQueryResultArticle::new(
+                    id,
+                    if chat.pick == 1 {
+                        InputMessageContentText::new("I've choosen my card")
+                    } else {
+                        InputMessageContentText::new(format!(
+                            "I've choosen my {}° card",
+                            played + 1
+                        ))
+                    },
+                    text,
+                );
+                Ok::<_, DbErr>(InlineQueryResult::Article(if played + 1 < chat.pick {
+                    res.with_reply_markup([[
+                        InlineKeyboardButton::for_switch_inline_query_current_chat(
+                            "Open cards hand",
+                            chat.id.to_string(),
+                        ),
+                    ]])
                 } else {
-                    InputMessageContentText::new(format!("I've choosen my {}° card", played + 1))
-                },
-                card.text.clone(),
-            ))
+                    res
+                }))
+            }))
         })
+        .try_flatten()
         .try_collect::<Vec<_>>()
         .await?;
 
@@ -385,4 +375,36 @@ where
         .await?;
 
     Ok(Ok(()))
+}
+
+/// split text in multiple lines if needed
+/// official line limit is 127 chars
+/// but text is trucated based on screen width
+/// so we'll use 50 chars to better fit screen
+///
+/// Telegram doesn't accept multiple inputs with the same id
+/// so we are appending a ";{index}"
+fn split_multiline_cards(text: String, id: String) -> Vec<(String, String)> {
+    let text_len = text.chars().count();
+    if text_len > 50 {
+        text.split_whitespace()
+            .fold(Vec::<(String, String)>::new(), |mut acc, word| {
+                if let Some((_, last)) = acc.last_mut() {
+                    if last.chars().count() + 1 + word.chars().count() > 50 {
+                        acc.push((
+                            format!("{id};{}", acc.len()),
+                            format!("{}: {word}", acc.len() + 1),
+                        ));
+                    } else {
+                        last.push(' ');
+                        last.push_str(word)
+                    }
+                } else {
+                    acc.push((format!("{id};0"), format!("1: {word}")));
+                }
+                acc
+            })
+    } else {
+        vec![(id, text)]
+    }
 }
