@@ -48,6 +48,13 @@ impl Model {
     pub fn tg_link(&self) -> String {
         format!("[{}](tg://user?id={})", self.name, self.telegram_id)
     }
+
+    pub fn tg_link_html(&self) -> String {
+        format!(
+            "<a href=\"tg://user?id={}\">{}</a>",
+            self.telegram_id, self.name
+        )
+    }
 }
 
 pub async fn insert<C: ConnectionTrait>(

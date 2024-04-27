@@ -193,7 +193,7 @@ where
         .stream(conn)
         .await?;
     let mut players = stream
-        .map_ok(|player| (player.id, Cow::Owned(player.tg_link())))
+        .map_ok(|player| (player.id, Cow::Owned(player.tg_link_html())))
         .try_collect::<HashMap<_, _>>()
         .await?;
     if players.is_empty() {
@@ -274,13 +274,13 @@ where
                 InlineQueryResult::Article(InlineQueryResultArticle::new(
                     id,
                     InputMessageContentText::new(format!(
-                        "*{}*\n\nI've choosen {}'s card{}:\n\n*{}*",
+                        "<b>{}</b>\n\nI've choosen {}'s card{}:\n\n<b>{}</b>",
                         black_card,
                         player,
                         if len > 1 { "s" } else { "" },
                         text
                     ))
-                    .with_parse_mode(ParseMode::Markdown),
+                    .with_parse_mode(ParseMode::Html),
                     line,
                 ))
             })
