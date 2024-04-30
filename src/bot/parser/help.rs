@@ -16,16 +16,16 @@ pub async fn execute(
             SendMessage::new(
                 chat.telegram_id,
                 format!(
-                    "[Cards Against Humanity Bot](https://github.com/nappa85/cah_bot/)
+                    "[Cards Against Humanity Bot](https://github\\.com/nappa85/cah\\_bot/)
 
-/close - close the game and get a winner
-/help - this message
-/start - start or join the game in this chat
-/settings - change game setting
-/status - show game status
-/rank - show players ranking
+/close \\- close the game and get a winner
+/help \\- this message
+/start \\- start or join the game in this chat
+/settings \\- change game setting
+/status \\- show game status
+/rank \\- show players ranking
 
-To view you hand and choose a card for this game use the inline command `@{bot_name} {}`
+To view you hand and choose a card for this game use the inline command `{bot_name} {}`
                 ",
                     chat.id
                 ),
@@ -37,7 +37,7 @@ To view you hand and choose a card for this game use the inline command `@{bot_n
                     chat.id.to_string(),
                 )]],
             )
-            .with_parse_mode(ParseMode::Markdown),
+            .with_parse_mode(ParseMode::MarkdownV2),
         )
         .await?;
 

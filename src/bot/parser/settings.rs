@@ -126,7 +126,7 @@ where
                                     ),
                                 ]])
                                 .with_reply_parameters(ReplyParameters::new(message_id))
-                                .with_parse_mode(ParseMode::Markdown),
+                                .with_parse_mode(ParseMode::MarkdownV2),
                         )
                         .await?;
                 }
@@ -257,7 +257,7 @@ where
             keyboard.push(vec![InlineKeyboardButton::for_callback_data(
                 format!(
                     "{} {}",
-                    pack.name,
+                    pack.name(),
                     if enabled.contains(&pack.id) {
                         ENABLED
                     } else {

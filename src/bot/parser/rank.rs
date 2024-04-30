@@ -71,7 +71,7 @@ where
                         chat.id.to_string(),
                     )]],
                 )
-                .with_parse_mode(ParseMode::Markdown),
+                .with_parse_mode(ParseMode::MarkdownV2),
         )
         .await?;
 

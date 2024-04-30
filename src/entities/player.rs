@@ -9,7 +9,7 @@ pub struct Model {
     pub id: i32,
     pub telegram_id: i64,
     pub chat_id: i32,
-    pub name: String,
+    name: String,
     pub turn: i32,
     pub points: i32,
 }
@@ -46,13 +46,10 @@ impl Model {
     }
 
     pub fn tg_link(&self) -> String {
-        format!("[{}](tg://user?id={})", self.name, self.telegram_id)
-    }
-
-    pub fn tg_link_html(&self) -> String {
         format!(
-            "<a href=\"tg://user?id={}\">{}</a>",
-            self.telegram_id, self.name
+            "[{}](tg://user?id={})",
+            crate::utils::escape_markdown(&self.name),
+            self.telegram_id
         )
     }
 }

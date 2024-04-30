@@ -10,7 +10,13 @@ pub struct Model {
     pub pack_id: i32,
     pub color: Color,
     pub pick: Option<i32>,
-    pub text: String,
+    text: String,
+}
+
+impl Model {
+    pub fn text(&self) -> String {
+        crate::utils::escape_markdown(&self.text)
+    }
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -41,7 +47,7 @@ impl Model {
     }
 
     pub fn descr(&self) -> String {
-        let mut descr = format!("*{}*", self.text);
+        let mut descr = format!("*{}*", self.text());
         if let Some(pick) = self.pick {
             if pick > 1 {
                 descr.push_str("\nPick ");

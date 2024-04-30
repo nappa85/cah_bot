@@ -211,7 +211,7 @@ impl Model {
             winners.join(" and "),
             winner_points,
             if winners.len() == 1 && winners[0] == crate::RANDO_CARLISSIAN {
-                "\n\n*SHAME ON YOU!!!*"
+                "\n\n*SHAME ON YOU\\!\\!\\!*"
             } else {
                 ""
             }
@@ -225,11 +225,11 @@ pub enum ChatError {
     Channel,
     #[error("This bot doesn't works on private chats")]
     Private,
-    #[error("There seems to be no players in this game (this is probably a bug)")]
+    #[error("There seems to be no players in this game \\(this is probably a bug\\)")]
     Empty,
     #[error(transparent)]
     Pick(#[from] hand::PickError),
-    #[error("No black card picked (this is a bug)")]
+    #[error("No black card picked \\(this is a bug\\)")]
     NoBlackCard,
 }
 

@@ -61,7 +61,7 @@ where
         };
 
         client
-            .execute(SendMessage::new(chat.telegram_id, msg).with_parse_mode(ParseMode::Markdown))
+            .execute(SendMessage::new(chat.telegram_id, msg).with_parse_mode(ParseMode::MarkdownV2))
             .await?;
     }
 
@@ -136,7 +136,7 @@ where
                         chat.id.to_string(),
                     )]],
                 )
-                .with_parse_mode(ParseMode::Markdown),
+                .with_parse_mode(ParseMode::MarkdownV2),
         )
         .await?;
 
@@ -224,7 +224,7 @@ where
                             chat.id.to_string(),
                         ),
                     ]])
-                    .with_parse_mode(ParseMode::Markdown),
+                    .with_parse_mode(ParseMode::MarkdownV2),
             )
             .await?;
     }

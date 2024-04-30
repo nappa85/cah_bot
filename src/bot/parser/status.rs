@@ -16,13 +16,13 @@ use crate::{
 pub enum StatusError {
     #[error("Not enough players in the game")]
     NotEnoughPlayers,
-    #[error("No judge in game (this is a bug)")]
+    #[error("No judge in game \\(this is a bug\\)")]
     NoJudge,
-    #[error("No black card in game (this is a bug)")]
+    #[error("No black card in game \\(this is a bug\\)")]
     NoBlackCard,
-    #[error("Multiple black card in game (this is a bug)")]
+    #[error("Multiple black card in game \\(this is a bug\\)")]
     MultiBlackCard,
-    #[error("Invalid black card in game (this is a bug)")]
+    #[error("Invalid black card in game \\(this is a bug\\)")]
     InvalidBlackCard,
 }
 
@@ -99,7 +99,7 @@ where
     let mut msg = format!(
         "Turn {}\n\n*{}*\n\nJudge is {}",
         chat.turn,
-        black_card.text,
+        black_card.text(),
         judge.tg_link()
     );
     for player in players {
@@ -135,7 +135,7 @@ where
                         chat.id.to_string(),
                     )]],
                 )
-                .with_parse_mode(ParseMode::Markdown),
+                .with_parse_mode(ParseMode::MarkdownV2),
         )
         .await?;
 

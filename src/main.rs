@@ -5,6 +5,7 @@ use tgbot::api::{ClientError, ExecuteError};
 
 mod bot;
 mod entities;
+mod utils;
 
 const PACKS: &str = include_str!("../cah-cards-full.json");
 static RANDO_CARLISSIAN: &str = "Rando Carlissian";

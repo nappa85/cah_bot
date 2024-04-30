@@ -21,20 +21,20 @@ use crate::{
 static SILLY_RESPONSES: &[&str] = &[
     "I'm a silly person and I press on errors",
     "Are you gonna eat that?",
-    "If I close my eyes I can't see you!",
+    "If I close my eyes I can't see you\\!",
     "I'm reviewing my life",
     "Now I'm in a good mood",
-    "I want to be better, I swear!",
+    "I want to be better, I swear\\!",
     "If you had my life, you'd be happy too",
     "There's a lot in my head",
     "I stay up late thinking about it and it's overwhelming",
-    "Everything is awesome! Like awesome awesome awesome awesome awesome awesome-er than before!",
+    "Everything is awesome\\! Like awesome awesome awesome awesome awesome awesome\\-er than before\\!",
     "I'm on the verge of tears, but it's okay",
     "I have a lot to cry about",
-    "It all depends on how YOU feel...",
+    "It all depends on how YOU feel\\.\\.\\.",
     "Oh, I'm not fine",
     "I don't want to talk about it",
-    "Crazy is one-word people should use to describe me",
+    "Crazy is one\\-word people should use to describe me",
     "I have too much on my mind right now",
     "I'm on the road to being awesome",
     "It's been a while since I've been great",
@@ -47,7 +47,7 @@ static SILLY_RESPONSES: &[&str] = &[
     "People always say that you shouldn't complain about your life, but what else should I talk about?",
     "I just had a deep conversation with myself",
     "I don't think that it went very well",
-    "Good Morning! Now that I have woken up, my day is ruined",
+    "Good Morning\\! Now that I have woken up, my day is ruined",
     "It's hard to wake up in the morning when you're always tired",
     "I am like a box of chocolates; nobody knows what they're going to get",
     "I feel like a chicken in a burger factory",
@@ -55,8 +55,8 @@ static SILLY_RESPONSES: &[&str] = &[
     "I'm feeling pretty good about myself, though I can't quite remember why right now",
     "My therapist told me to stay off the internet until she approves my new profile picture",
     "There are times when I sit and look at my hands and wonder, “What if they were feet?”",
-    "Happiness is just around the corner...let's go around again!",
-    "I wish I had the energy of a newborn baby...oh, wait. That would require getting out of bed",
+    "Happiness is just around the corner\\.\\.\\.let's go around again\\!",
+    "I wish I had the energy of a newborn baby\\.\\.\\.oh, wait\\. That would require getting out of bed",
     "I would say that I don't have enough information to answer “how are you”, but that wouldn't be true",
     "The difference between “I’m fine” and “I’ve been better” is about 3 coffees",
     "I tried to think of something deep and meaningful, but I thought too hard and hurt myself",
@@ -67,34 +67,34 @@ static SILLY_RESPONSES: &[&str] = &[
     "I’m not sure, you tell me",
     "I haven’t done anything particularly noteworthy",
     "Sometimes, words are not necessary",
-    "Nobody tells me how to live my life!",
-    "I’m happy because today I saw a dog wearing sunglasses and it was adorable!",
+    "Nobody tells me how to live my life\\!",
+    "I’m happy because today I saw a dog wearing sunglasses and it was adorable\\!",
     "Just another day in my wonderful life",
     "If you check out enough monkeys, sooner or later one of them will start typing Shakespeare",
-    "They're taking the hobbits to Isengard!",
-    "In case you haven’t noticed, I’m weird. I’m a weirdo",
-    "Supercalifragilisticexpialidocious!",
+    "They're taking the hobbits to Isengard\\!",
+    "In case you haven’t noticed, I’m weird\\. I’m a weirdo",
+    "Supercalifragilisticexpialidocious\\!",
     "May the Force be with you",
     "There's no place like home",
-    "I’m the king of the world!",
-    "My mama always said life was like a box of chocolates. You never know what you're gonna get",
+    "I’m the king of the world\\!",
+    "My mama always said life was like a box of chocolates\\. You never know what you're gonna get",
     "You're gonna need a bigger boat",
-    "My precious!",
+    "My precious\\!",
     "Houston, we have a problem",
-    "E.T. phone home",
-    "You can't handle the truth!",
-    "A martini. Shaken, not stirred",
+    "E\\.T\\. phone home",
+    "You can't handle the truth\\!",
+    "A martini\\. Shaken, not stirred",
     "I am your father",
     "What we've got here is failure to communicate",
     "Hasta la vista, baby",
-    "Bond. James Bond",
+    "Bond\\. James Bond",
     "Roads? Where we're going we don't need roads",
     "Nobody puts Baby in a corner",
     "Well, nobody's perfect",
-    "They may take our lives, but they'll never take our freedom!",
-    "To infinity and beyond!",
+    "They may take our lives, but they'll never take our freedom\\!",
+    "To infinity and beyond\\!",
     "Toto, I've a feeling we're not in Kansas anymore",
-    "Harambe died for our sins!",
+    "Harambe died for our sins\\!",
 ];
 
 #[derive(thiserror::Error, Debug)]
@@ -193,7 +193,7 @@ where
         .stream(conn)
         .await?;
     let mut players = stream
-        .map_ok(|player| (player.id, Cow::Owned(player.tg_link_html())))
+        .map_ok(|player| (player.id, Cow::Owned(player.tg_link())))
         .try_collect::<HashMap<_, _>>()
         .await?;
     if players.is_empty() {
@@ -247,7 +247,7 @@ where
         .await?;
     let cards = stream
         .try_fold(HashMap::with_capacity(hands.len()), |mut cards, card| {
-            cards.insert(card.id, card.text);
+            cards.insert(card.id, card.text());
             future::ready(Ok(cards))
         })
         .await?;
@@ -274,14 +274,14 @@ where
                 InlineQueryResult::Article(InlineQueryResultArticle::new(
                     id,
                     InputMessageContentText::new(format!(
-                        "<b>{}</b>\n\nI've choosen {}'s card{}:\n\n<b>{}</b>",
+                        "*{}*\n\nI've choosen {}'s card{}:\n\n*{}*",
                         black_card,
                         player,
                         if len > 1 { "s" } else { "" },
                         text
                     ))
-                    .with_parse_mode(ParseMode::Html),
-                    line,
+                    .with_parse_mode(ParseMode::MarkdownV2),
+                    crate::utils::unescape_markdown(line),
                 ))
             })
         })
@@ -339,7 +339,7 @@ where
         .await?;
     let cards = stream
         .map_ok(|card| {
-            let lines = split_multiline_cards(card.text, hands[&card.id].to_string());
+            let lines = split_multiline_cards(card.text(), hands[&card.id].to_string());
 
             stream::iter(lines.into_iter().map(|(id, text)| {
                 let res = InlineQueryResultArticle::new(

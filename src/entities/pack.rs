@@ -12,8 +12,14 @@ use super::{card, chat_pack};
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
-    pub name: String,
+    name: String,
     pub official: bool,
+}
+
+impl Model {
+    pub fn name(&self) -> String {
+        crate::utils::escape_markdown(&self.name)
+    }
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

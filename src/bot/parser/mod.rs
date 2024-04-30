@@ -80,7 +80,7 @@ where
             .execute(
                 SendMessage::new(tg_chat.get_id(), format!("Error: {err}"))
                     .with_reply_parameters(ReplyParameters::new(message_id))
-                    .with_parse_mode(ParseMode::Markdown),
+                    .with_parse_mode(ParseMode::MarkdownV2),
             )
             .await?;
     }
@@ -115,7 +115,7 @@ where
             .execute(
                 SendMessage::new(tg_chat.get_id(), format!("Error: {err}"))
                     .with_reply_parameters(ReplyParameters::new(message_id))
-                    .with_parse_mode(ParseMode::Markdown),
+                    .with_parse_mode(ParseMode::MarkdownV2),
             )
             .await?;
     }
