@@ -29,10 +29,12 @@ pub enum Error {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Error> {
+    tracing_subscriber::fmt::init();
+
     let token = env::var("BOT_TOKEN").map_err(|_| Error::MissingBotToken)?;
     let name = env::var("BOT_NAME").map_err(|_| Error::MissingBotName)?;
     let name = format!("@{}", name.strip_prefix('@').unwrap_or(name.as_str()));
-    let conn = Database::connect("sqlite:cah.sqlite3").await?;
+    let conn = Database::connect("mysql://mariadb:mariadb@mariadb/cah_bot").await?;
 
     entities::pack::init(&conn).await?;
 
