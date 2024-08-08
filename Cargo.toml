@@ -9,7 +9,7 @@ edition = "2021"
 chrono = "0.4.38"
 futures-util = "0.3.30"
 rand = "0.8.5"
-sea-orm = { version = "0.12.15", features = [
+sea-orm = { version = "1.0.0", features = [
     "macros",
     "sqlx-mysql",
     "runtime-tokio-rustls",
@@ -17,7 +17,7 @@ sea-orm = { version = "0.12.15", features = [
 serde = { version = "1.0.199", features = ["derive"] }
 serde_json = "1.0.116"
 thiserror = "1.0.59"
-tgbot = "0.27.0"
+tgbot = "0.28.0"
 tokio = { version = "1.37.0", features = [
     "macros",
     "rt",
@@ -28,7 +28,7 @@ tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 [dev-dependencies]
-sea-orm = { version = "0.12.15", features = [
+sea-orm = { version = "1.0.0", features = [
     "macros",
     "sqlx-mysql",
     "runtime-tokio-rustls",

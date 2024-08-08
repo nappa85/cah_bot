@@ -50,7 +50,7 @@ impl Related<chat::Entity> for Entity {
 impl ActiveModelBehavior for ActiveModel {}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
-#[sea_orm(rs_type = "String", db_type = "String(Some(5))")]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(5))")]
 pub enum Color {
     #[sea_orm(string_value = "black")]
     Black,
