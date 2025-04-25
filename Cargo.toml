@@ -11,7 +11,7 @@ futures-util = "0.3.30"
 rand = "0.8.5"
 sea-orm = { version = "1.0.0", features = [
     "macros",
-    "sqlx-mysql",
+    "sqlx-postgres",
     "runtime-tokio-rustls",
 ] }
 serde = { version = "1.0.199", features = ["derive"] }
@@ -30,7 +30,7 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 [dev-dependencies]
 sea-orm = { version = "1.0.0", features = [
     "macros",
-    "sqlx-mysql",
+    "sqlx-postgres",
     "runtime-tokio-rustls",
     "mock",
 ] }
